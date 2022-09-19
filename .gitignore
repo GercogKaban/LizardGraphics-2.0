@@ -304,3 +304,14 @@ models
 textures
 CMakeSettings.json
 android-ndk-r25b
+ThirdParty\vulkan\Bin
+ThirdParty\vulkan\Bin32
+ThirdParty\vulkan\Demos
+ThirdParty\vulkan\Helpers
+ThirdParty\vulkan\installerResources
+ThirdParty\vulkan\Lib
+ThirdParty\vulkan\Lib32
+ThirdParty\vulkan\Templates
+
+*.lib
+*.dll
