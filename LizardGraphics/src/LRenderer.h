@@ -5,6 +5,12 @@
 #include <optional>
 #include "globals.h"
 
+#ifdef __APPLE__
+#define VK_KHR_PORTABILITY_SUBSET "VK_KHR_portability_subset"
+#else
+#define VK_KHR_PORTABILITY_SUBSET 
+#endif
+
 class LRenderer
 {
 public:
@@ -67,7 +73,7 @@ private:
 
 	// properties
 	const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
-    const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, "VK_KHR_portability_subset"};
+    const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PORTABILITY_SUBSET};
 
 #if NDEBUG
 	const bool enableValidationLayers = false;

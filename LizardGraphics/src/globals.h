@@ -27,8 +27,6 @@ typedef char __int8;
 typedef short __int16;
 typedef long __int32;
 typedef long long __int64;
-#else
-#error Must define __int64 for your platform
 #endif
 #endif
 
