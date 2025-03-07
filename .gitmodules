@@ -1,6 +1,0 @@
-[submodule "LizardGraphics/glfw"]
-	path = LizardGraphics/glfw
-	url = https://github.com/glfw/glfw
-[submodule "LizardGraphics/magic_enum"]
-	path = LizardGraphics/magic_enum
-	url = https://github.com/Neargye/magic_enum
