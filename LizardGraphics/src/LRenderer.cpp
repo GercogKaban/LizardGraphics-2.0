@@ -142,15 +142,24 @@ VkResult LRenderer::createInstance()
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     createInfo.pApplicationInfo = &appInfo;
-
-    uint32 glfwExtensionCount = 0;
+    
+    // required extension request
+    uint32_t glfwExtensionCount = 0;
     const char** glfwExtensions;
-
     glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
+    
+#ifdef __APPLE__
+    std::vector<const char*> instanceExtensions(glfwExtensionCount);
+    memcpy(instanceExtensions.data(), glfwExtensions, sizeof(const char*) * glfwExtensionCount);
+    instanceExtensions.push_back("VK_KHR_portability_enumeration");
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
+    createInfo.ppEnabledExtensionNames = instanceExtensions.data();
+#else
     createInfo.enabledExtensionCount = glfwExtensionCount;
     createInfo.ppEnabledExtensionNames = glfwExtensions;
+#endif
 
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
     if (enableValidationLayers) 

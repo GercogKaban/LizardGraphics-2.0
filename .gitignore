@@ -305,3 +305,10 @@ textures
 CMakeSettings.json
 android-ndk-r25b
 .DS_Store
+*.make
+*.xcsettings
+*.xcuserstate
+*.xcscheme
+*.xcbkptlist
+*.plist
+*.pbxproj

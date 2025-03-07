@@ -21,6 +21,17 @@
         DEBUG_BREAK \
     } \
 
+#ifndef int64
+#ifdef __APPLE__
+typedef char __int8;
+typedef short __int16;
+typedef long __int32;
+typedef long long __int64;
+#else
+#error Must define __int64 for your platform
+#endif
+#endif
+
 using int8 = __int8;
 using int16 = __int16;
 using int32 = __int32;
