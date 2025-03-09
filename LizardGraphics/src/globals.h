@@ -20,11 +20,14 @@
 #define VK_KHR_PORTABILITY_SUBSET 
 #endif
 
+#define RAISE_VK_ERROR(x) \
+LLogger::LogString(x, true); \
+DEBUG_BREAK \
+
 #define HANDLE_VK_ERROR(func) \
     if (auto res = func != VK_SUCCESS) \
     { \
-        LLogger::LogString(res, true); \
-        DEBUG_BREAK \
+        RAISE_VK_ERROR(res)\
     } \
 
 #ifndef int64

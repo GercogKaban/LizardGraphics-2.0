@@ -29,6 +29,8 @@ private:
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData);
 
+	static void framebufferResizeCallback(GLFWwindow* window, int32 width, int32 height);
+	
 	void DestroyDebugUtilsMessengerEXT(VkInstance instanceIn, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator);
 	void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
 
@@ -46,6 +48,9 @@ private:
 	VkResult createCommandBuffers();
 	VkResult createSyncObjects();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageIndex);
+
+	void cleanupSwapChain();
+	void recreateSwapChain();
 
 	void drawFrame();
 	
@@ -117,6 +122,8 @@ private:
 	std::vector<VkSemaphore> imageAvailableSemaphores;
 	std::vector<VkSemaphore> renderFinishedSemaphores;
 	std::vector<VkFence> inFlightFences;
+
+	static bool bFramebufferResized;
 
 	std::filesystem::path shadersPath;
 

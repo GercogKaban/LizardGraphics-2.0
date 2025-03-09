@@ -7,9 +7,14 @@
 
 #include "vulkan/vulkan.h"
 
+bool LRenderer::bFramebufferResized = false;
+
 LRenderer::LRenderer(GLFWwindow* window)
 {
     this->window = window;
+    
+    glfwSetWindowUserPointer(window, this);
+    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 	init();
 }
 
@@ -48,26 +53,21 @@ void LRenderer::init()
 
 void LRenderer::cleanup()
 {
+    cleanupSwapChain();
+
+    vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
+    vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+    vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
+    
     for (uint32 i = 0; i < maxFramesInFlight; ++i)
     {
         vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], nullptr);
         vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], nullptr);
         vkDestroyFence(logicalDevice, inFlightFences[i], nullptr);
     }
-    vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
-    for (auto framebuffer : swapChainFramebuffers)
-    {
-        vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
-    }
-    vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
-    vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-    vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
     
-    for (auto imageView : swapChainImageViews)
-    {
-        vkDestroyImageView(logicalDevice, imageView, nullptr);
-    }
-    vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
+    vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
+    
     vkDestroyDevice(logicalDevice, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -466,7 +466,7 @@ VkResult LRenderer::rebuildShaders()
 VkResult LRenderer::createFramebuffers()
 {
     swapChainFramebuffers.resize(swapChainImageViews.size());
-    for (uint64 i = 0; i < swapChainImageViews.size(); i++)
+    for (uint32 i = 0; i < swapChainImageViews.size(); ++i)
     {
         VkImageView attachments[] =
         {
@@ -576,15 +576,61 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     HANDLE_VK_ERROR(vkEndCommandBuffer(commandBuffer))
 }
 
+void LRenderer::cleanupSwapChain()
+{
+    for (uint32 i = 0; i < swapChainFramebuffers.size(); ++i)
+    {
+        vkDestroyFramebuffer(logicalDevice, swapChainFramebuffers[i], nullptr);
+    }
+
+    for (uint32 i = 0; i < swapChainImageViews.size(); ++i)
+    {
+        vkDestroyImageView(logicalDevice, swapChainImageViews[i], nullptr);
+    }
+
+    vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
+}
+
+void LRenderer::recreateSwapChain()
+{
+    int32 width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    
+    while (width == 0 || height == 0)
+    {
+        glfwGetFramebufferSize(window, &width, &height);
+        glfwWaitEvents();
+    }
+    
+    vkDeviceWaitIdle(logicalDevice);
+
+    cleanupSwapChain();
+    
+    createSwapChain();
+    createImageViews();
+    createFramebuffers();
+}
+
 void LRenderer::drawFrame()
 {
     vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+    uint32 imageIndex;
+
+    VkResult result = vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+        recreateSwapChain();
+        return;
+    }
+    else if (result != VK_SUCCESS)
+    {
+        RAISE_VK_ERROR(result)
+    }
+
     vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
     
-    uint32 imageIndex;
-    vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
-    
     recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
     
     VkSubmitInfo submitInfo{};
@@ -615,7 +661,18 @@ void LRenderer::drawFrame()
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
     presentInfo.pResults = nullptr; // Optional
+
     vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || bFramebufferResized)
+    {
+        bFramebufferResized = false;
+        recreateSwapChain();
+    }
+    else if (result != VK_SUCCESS)
+    {
+        RAISE_VK_ERROR(result)
+    }
 
     currentFrame = (currentFrame + 1) % maxFramesInFlight;
 }
@@ -898,4 +955,9 @@ VkExtent2D LRenderer::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
     actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
 
     return actualExtent;
+}
+
+void LRenderer::framebufferResizeCallback(GLFWwindow* window, int32 width, int32 height)
+{
+    LRenderer::bFramebufferResized = true;
 }
