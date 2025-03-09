@@ -5,18 +5,14 @@
 #include <optional>
 #include "globals.h"
 
-#ifdef __APPLE__
-#define VK_KHR_PORTABILITY_SUBSET "VK_KHR_portability_subset"
-#else
-#define VK_KHR_PORTABILITY_SUBSET 
-#endif
-
 class LRenderer
 {
 public:
 
 	LRenderer(class GLFWwindow* window);
 	~LRenderer();
+
+	void loop();
 
 private:
 
@@ -27,13 +23,13 @@ private:
 	std::vector<const char*> getRequiredExtensions() const;
 
 	VkResult setupDebugMessenger();
-	VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
+	VkResult CreateDebugUtilsMessengerEXT(VkInstance instanceIn, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
 		const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger);
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData);
 
-	void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator);
+	void DestroyDebugUtilsMessengerEXT(VkInstance instanceIn, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator);
 	void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
 
 	VkResult createInstance();
@@ -41,6 +37,17 @@ private:
     VkResult createLogicalDevice();
 	VkResult createSurface();
 	VkResult createImageViews();
+	VkResult createRenderPass();
+	VkResult createGraphicsPipeline();
+	VkShaderModule createShaderModule(const std::vector<char>& code);
+	VkResult rebuildShaders();
+	VkResult createFramebuffers();
+	VkResult createCommandPool();
+	VkResult createCommandBuffer();
+	VkResult createSyncObjects();
+	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageIndex);
+
+	void drawFrame();
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -78,7 +85,8 @@ private:
 #if NDEBUG
 	const bool enableValidationLayers = false;
 #else
-	const bool enableValidationLayers = true;
+	// TODO: for now it always false, becayse it cayses a strange crash in vkCreateGraphicsPipelines 
+	const bool enableValidationLayers = false;
 #endif
 	VkInstance instance;
 	
@@ -97,5 +105,19 @@ private:
 	VkExtent2D swapChainExtent;
 	std::vector<VkImage> swapChainImages;
 	std::vector<VkImageView> swapChainImageViews;
+	std::vector<VkFramebuffer> swapChainFramebuffers;
+
+	VkPipeline graphicsPipeline;
+	VkRenderPass renderPass;
+	VkPipelineLayout pipelineLayout;
+
+	VkCommandPool commandPool;
+	VkCommandBuffer commandBuffer;
+
+	VkSemaphore imageAvailableSemaphore;
+	VkSemaphore renderFinishedSemaphore;
+	VkFence inFlightFence;
+
+	std::filesystem::path shadersPath;
 };
 

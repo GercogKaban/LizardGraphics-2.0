@@ -1,7 +1,10 @@
 cmake_minimum_required (VERSION 3.20)
 project (LizardGraphics C CXX)
 
-file(GLOB HEADER_FILES src/*.h)
+set(CMAKE_SKIP_INSTALL_RULES ON)
+set(CMAKE_SUPPRESS_REGENERATION ON)
+
+file(GLOB HEADER_FILES src/*.h *.txt)
 file(GLOB SOURCE_FILES src/*.cpp)
 
 find_package(Vulkan REQUIRED FATAL_ERROR)
@@ -19,5 +22,5 @@ add_subdirectory(glfw)
 
 #/////////////////////////////////////////////////
 
-target_precompile_headers(LizardGraphics PUBLIC ${HEADER_FILES})
-target_compile_features(LizardGraphics PRIVATE cxx_std_17)
+target_precompile_headers(LizardGraphics PUBLIC src/pch.h)
+target_compile_features(LizardGraphics PRIVATE cxx_std_20)

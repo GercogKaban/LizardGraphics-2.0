@@ -23,14 +23,6 @@ LWindow::~LWindow()
 	glfwTerminate();
 }
 
-void LWindow::loop()
-{
-	while (_window && !glfwWindowShouldClose(_window)) 
-	{
-		glfwPollEvents();
-	}
-}
-
 LWindow::WindowInitRes LWindow::init(const LWindowSpecs& wndSpecs)
 {
 	if (auto res = glfwInit(); res != GLFW_TRUE)

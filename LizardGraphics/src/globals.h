@@ -14,6 +14,12 @@
 #define DEBUG_BREAK raise(SIGTRAP);
 #endif
 
+#ifdef __APPLE__
+#define VK_KHR_PORTABILITY_SUBSET "VK_KHR_portability_subset"
+#else
+#define VK_KHR_PORTABILITY_SUBSET 
+#endif
+
 #define HANDLE_VK_ERROR(func) \
     if (auto res = func != VK_SUCCESS) \
     { \

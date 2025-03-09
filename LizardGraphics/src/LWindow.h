@@ -1,6 +1,5 @@
 #pragma once
 
-#include "pch.h"
 #include "globals.h"
 
 class LWindow
@@ -16,8 +15,6 @@ public:
 
 	LWindow(const struct LWindowSpecs& wndSpecs);
 	~LWindow();
-
-	void loop();
 
 	class GLFWwindow* const getWindow() const { return _window; }
 

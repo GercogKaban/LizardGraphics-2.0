@@ -1,6 +1,5 @@
 #include "src/LWindow.h"
 #include "src/LRenderer.h"
-#include <signal.h>
 
 int main()
 { 
@@ -8,6 +7,5 @@ int main()
 	LWindow wnd(wndSpecs);
 
 	LRenderer renderer(wnd.getWindow());
-	wnd.loop();
-	//return 0;
+	renderer.loop();
 }

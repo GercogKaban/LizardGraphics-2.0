@@ -9,7 +9,7 @@ public:
 	~LLogger(){}
 
 	template<typename T>
-	static void LogString(T val, bool bLogToFile)
+	static void LogString(T val, bool bLogToFile = true)
 	{
 		LogStringImpl(val, bLogToFile, std::is_enum<T>());
 	}
