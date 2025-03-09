@@ -43,7 +43,7 @@ private:
 	VkResult rebuildShaders();
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
-	VkResult createCommandBuffer();
+	VkResult createCommandBuffers();
 	VkResult createSyncObjects();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageIndex);
 
@@ -85,7 +85,7 @@ private:
 #if NDEBUG
 	const bool enableValidationLayers = false;
 #else
-	// TODO: for now it always false, becayse it cayses a strange crash in vkCreateGraphicsPipelines 
+	// TODO: for now it always false, because it causes a strange crash in vkCreateGraphicsPipelines 
 	const bool enableValidationLayers = false;
 #endif
 	VkInstance instance;
@@ -112,12 +112,15 @@ private:
 	VkPipelineLayout pipelineLayout;
 
 	VkCommandPool commandPool;
-	VkCommandBuffer commandBuffer;
+	std::vector<VkCommandBuffer> commandBuffers;
 
-	VkSemaphore imageAvailableSemaphore;
-	VkSemaphore renderFinishedSemaphore;
-	VkFence inFlightFence;
+	std::vector<VkSemaphore> imageAvailableSemaphores;
+	std::vector<VkSemaphore> renderFinishedSemaphores;
+	std::vector<VkFence> inFlightFences;
 
 	std::filesystem::path shadersPath;
+
+	const int32 maxFramesInFlight = 2;
+	uint32 currentFrame = 0;
 };
 

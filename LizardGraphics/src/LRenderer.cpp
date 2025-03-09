@@ -42,15 +42,18 @@ void LRenderer::init()
     HANDLE_VK_ERROR(createGraphicsPipeline())
     HANDLE_VK_ERROR(createFramebuffers())
     HANDLE_VK_ERROR(createCommandPool())
-    HANDLE_VK_ERROR(createCommandBuffer())
+    HANDLE_VK_ERROR(createCommandBuffers())
     HANDLE_VK_ERROR(createSyncObjects())
 }
 
 void LRenderer::cleanup()
 {
-    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
-    vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+    for (uint32 i = 0; i < maxFramesInFlight; ++i)
+    {
+        vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], nullptr);
+        vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], nullptr);
+        vkDestroyFence(logicalDevice, inFlightFences[i], nullptr);
+    }
     vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
     for (auto framebuffer : swapChainFramebuffers)
     {
@@ -496,19 +499,25 @@ VkResult LRenderer::createCommandPool()
     return vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &commandPool);
 }
 
-VkResult LRenderer::createCommandBuffer()
+VkResult LRenderer::createCommandBuffers()
 {
+    commandBuffers.resize(maxFramesInFlight);
+    
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = commandPool;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+    allocInfo.commandBufferCount = static_cast<uint32>(commandBuffers.size());
 
-    return vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+    return vkAllocateCommandBuffers(logicalDevice, &allocInfo, commandBuffers.data());
 }
 
 VkResult LRenderer::createSyncObjects()
 {
+    imageAvailableSemaphores.resize(maxFramesInFlight);
+    renderFinishedSemaphores.resize(maxFramesInFlight);
+    inFlightFences.resize(maxFramesInFlight);
+    
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
@@ -516,9 +525,12 @@ VkResult LRenderer::createSyncObjects()
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    HANDLE_VK_ERROR(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore))
-    HANDLE_VK_ERROR(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore))
-    HANDLE_VK_ERROR(vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence))
+    for (uint32 i = 0; i < maxFramesInFlight; ++i)
+    {
+        HANDLE_VK_ERROR(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]))
+        HANDLE_VK_ERROR(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]))
+        HANDLE_VK_ERROR(vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFences[i]))
+    }
 
     return VK_SUCCESS;
 }
@@ -566,31 +578,31 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
 
 void LRenderer::drawFrame()
 {
-    vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-    vkResetFences(logicalDevice, 1, &inFlightFence);
+    vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+    vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
     
     uint32 imageIndex;
-    vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    vkResetCommandBuffer(commandBuffer, 0);
+    vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+    vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     
-    recordCommandBuffer(commandBuffer, imageIndex);
+    recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
     
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+    VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
     
-    VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+    VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
     
-    HANDLE_VK_ERROR(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence))
+    HANDLE_VK_ERROR(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]))
     
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -604,6 +616,8 @@ void LRenderer::drawFrame()
     presentInfo.pImageIndices = &imageIndex;
     presentInfo.pResults = nullptr; // Optional
     vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    currentFrame = (currentFrame + 1) % maxFramesInFlight;
 }
 
 VkResult LRenderer::pickPhysicalDevice()
