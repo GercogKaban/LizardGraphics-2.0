@@ -77,37 +77,29 @@ private:
 	VkResult rebuildShaders();
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	
 	template<typename Buffer>
 	void createVBO(const Buffer& vertices, VkMemoryBuffer& memoryBuffer)
 	{
 		using T = typename Buffer::value_type;
-
 		memoryBuffer.memorySize = sizeof(T) * vertices.size();
-		
-		VkBufferCreateInfo bufferInfo{};
-		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufferInfo.size = memoryBuffer.memorySize;
-		bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-		HANDLE_VK_ERROR(vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &memoryBuffer.buffer))
-
-		VkMemoryRequirements memRequirements;
-		vkGetBufferMemoryRequirements(logicalDevice, memoryBuffer.buffer, &memRequirements);
-
-		VkMemoryAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memRequirements.size;
-		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-		HANDLE_VK_ERROR(vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &memoryBuffer.memory))
-		HANDLE_VK_ERROR(vkBindBufferMemory(logicalDevice, memoryBuffer.buffer, memoryBuffer.memory, 0))
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
 		void* data;
-		HANDLE_VK_ERROR(vkMapMemory(logicalDevice, memoryBuffer.memory, 0, bufferInfo.size, 0, &data))
-		memcpy(data, vertices.data(), bufferInfo.size);
-		vkUnmapMemory(logicalDevice, memoryBuffer.memory);
+		vkMapMemory(logicalDevice, stagingBufferMemory, 0, memoryBuffer.memorySize, 0, &data);
+		memcpy(data, vertices.data(), memoryBuffer.memorySize);
+		vkUnmapMemory(logicalDevice, stagingBufferMemory);
+		
+		createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryBuffer.buffer, memoryBuffer.memory);
+		copyBuffer(stagingBuffer, memoryBuffer.buffer, memoryBuffer.memorySize);
+
+		vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
+		vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
 	}
 
 	void destroyVBO(VkMemoryBuffer& memoryBuffer)
