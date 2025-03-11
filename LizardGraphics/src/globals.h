@@ -1,5 +1,7 @@
 #pragma once
 
+#include <exception>
+
 #if defined(_MSC_VER)
     #define DEBUG_BREAK __debugbreak();
 #elif defined(__clang__) || defined(__GNUC__)
@@ -23,11 +25,12 @@
 #define RAISE_VK_ERROR(x) \
 LLogger::LogString(x, true); \
 DEBUG_BREAK \
+throw std::runtime_error("");\
 
 #define HANDLE_VK_ERROR(func) \
     if (auto res = func != VK_SUCCESS) \
     { \
-        RAISE_VK_ERROR(res)\
+        RAISE_VK_ERROR(func)\
     } \
 
 #ifndef int64

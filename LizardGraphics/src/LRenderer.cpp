@@ -5,30 +5,58 @@
 #define GLFW_INCLUDE_VULKAN
 #include <glfw3.h>
 
+#include "LWindow.h"
 #include "vulkan/vulkan.h"
+#include "Primitives.h"
 
+LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
 
-LRenderer::LRenderer(GLFWwindow* window)
+std::unordered_map<std::string, int32> ObjectBuilder::objectsCounter;
+std::unordered_map<std::string, VkMemoryBuffer> ObjectBuilder::memoryBuffers;
+
+#ifndef NDEBUG
+bool ObjectBuilder::bIsConstructing = false;
+#endif
+
+LRenderer::LRenderer(const LWindow& window)
 {
-    this->window = window;
+    if (thisPtr)
+    {
+        RAISE_VK_ERROR("LRenderer is a singleton object, can't create more than 1")
+    }
     
-    glfwSetWindowUserPointer(window, this);
-    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    thisPtr = this;
+    
+    this->window = window.getWindow();
+    specs = window.getWindowSpecs();
+    
+    glfwSetWindowUserPointer(this->window, this);
+    glfwSetFramebufferSizeCallback(this->window, framebufferResizeCallback);
 	init();
 }
 
 LRenderer::~LRenderer()
 {
     cleanup();
+    thisPtr = nullptr;
 }
 
 void LRenderer::loop()
 {
     while (window && !glfwWindowShouldClose(window)) 
     {
+        updateDelta();
+        fpsTimer+= getDelta();
+        if (fpsTimer >= 1.0f)
+        {
+            fpsTimer = 0.0f;
+            fps = 0;
+        }
+        
         glfwPollEvents();
         drawFrame();
+        fps++;
     }
     vkDeviceWaitIdle(logicalDevice);
 }
@@ -47,6 +75,7 @@ void LRenderer::init()
     HANDLE_VK_ERROR(createGraphicsPipeline())
     HANDLE_VK_ERROR(createFramebuffers())
     HANDLE_VK_ERROR(createCommandPool())
+    //HANDLE_VK_ERROR(createVBO(Primitives::verticesTriangle))
     HANDLE_VK_ERROR(createCommandBuffers())
     HANDLE_VK_ERROR(createSyncObjects())
 }
@@ -286,8 +315,8 @@ VkResult LRenderer::createRenderPass()
 
 VkResult LRenderer::createGraphicsPipeline()
 {
-    auto vertShaderCode = Util::readFile((shadersPath / "triangleVert.spv").string());
-    auto fragShaderCode = Util::readFile((shadersPath / "triangleFrag.spv").string());
+    auto vertShaderCode = Util::readFile((shadersPath / "genericVert.spv").string());
+    auto fragShaderCode = Util::readFile((shadersPath / "genericFrag.spv").string());
 
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -306,12 +335,16 @@ VkResult LRenderer::createGraphicsPipeline()
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
+    auto bindingDescription = Primitives::LPrimitiveVertexBuffer::getBindingDescription();
+    auto attributeDescriptions = Primitives::LPrimitiveVertexBuffer::getAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32>(attributeDescriptions.size());
+    
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly;
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -512,6 +545,22 @@ VkResult LRenderer::createCommandBuffers()
     return vkAllocateCommandBuffers(logicalDevice, &allocInfo, commandBuffers.data());
 }
 
+uint32 LRenderer::findMemoryType(uint32 typeFilter, VkMemoryPropertyFlags properties)
+{
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+    for (uint32 i = 0; i < memProperties.memoryTypeCount; ++i)
+    {
+        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+        {
+            return i;
+        }
+    }
+
+    RAISE_VK_ERROR("Failed to find suitable memory type!")
+}
+
 VkResult LRenderer::createSyncObjects()
 {
     imageAvailableSemaphores.resize(maxFramesInFlight);
@@ -571,7 +620,24 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    for (auto it = primitiveMeshes.begin(); it != primitiveMeshes.end(); ++it)
+    {
+        if (!it->expired())
+        {
+            Primitives::LPrimitiveMesh& mesh = *it->lock();
+            const auto& memoryBuffer = ObjectBuilder::getMemoryBuffer(mesh.typeName);
+            VkBuffer vertexBuffers[] = {memoryBuffer.buffer};
+            VkDeviceSize offsets[] = {0};
+            
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+            vkCmdDraw(commandBuffer, mesh.vertexCount, 1, 0, 0);
+        }
+        else
+        {
+            it = primitiveMeshes.erase(it);
+        }
+    }
+    
     vkCmdEndRenderPass(commandBuffer);
     HANDLE_VK_ERROR(vkEndCommandBuffer(commandBuffer))
 }
@@ -924,6 +990,11 @@ VkSurfaceFormatKHR LRenderer::chooseSwapSurfaceFormat(const std::vector<VkSurfac
 
 VkPresentModeKHR LRenderer::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const
 {
+    if (!specs.bVsync)
+    {
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+    
     for (const auto& availablePresentMode : availablePresentModes)
     {
         if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
@@ -931,7 +1002,7 @@ VkPresentModeKHR LRenderer::chooseSwapPresentMode(const std::vector<VkPresentMod
             return availablePresentMode;
         }
     }
-
+    
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -955,6 +1026,11 @@ VkExtent2D LRenderer::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
     actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
 
     return actualExtent;
+}
+
+void LRenderer::addPrimitve(std::weak_ptr<Primitives::LPrimitiveMesh> ptr)
+{
+    primitiveMeshes.push_back(ptr);
 }
 
 void LRenderer::framebufferResizeCallback(GLFWwindow* window, int32 width, int32 height)

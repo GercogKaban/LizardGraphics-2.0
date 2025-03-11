@@ -3,9 +3,12 @@
 
 int main()
 { 
-	LWindow::LWindowSpecs wndSpecs{ "LGWindow", 1280, 720 };
+	LWindow::LWindowSpecs wndSpecs{ "LGWindow", 1280, 720, false };
 	LWindow wnd(wndSpecs);
-
-	LRenderer renderer(wnd.getWindow());
+	
+	LRenderer renderer(wnd);
+	
+    auto triangle = ObjectBuilder::construct<Primitives::LTriangle>();
+	
 	renderer.loop();
 }
