@@ -6,7 +6,7 @@ Manifest:
 
 1. Maximum performance.
 2. Simplicity.
-3. Windows, Linux, Android support.
+3. Windows, MacOS, Linux, Android support.
 4. Realistic lighting.
 5. Only Vulkan API.
 6. Modern C++.
