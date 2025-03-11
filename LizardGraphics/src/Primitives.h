@@ -46,22 +46,30 @@ namespace Primitives
             return attributeDescriptions;
         }
 
-        virtual const std::vector<Vertex>& getBuffer() = 0;
+        virtual const std::vector<Vertex>& getVertexBuffer() = 0;
+        virtual const std::vector<uint16>& getIndexBuffer() = 0;
+        
         virtual ~LPrimitiveVertexBuffer() = default;
     };
     
-    class LTriangleVertexBuffer : public LPrimitiveVertexBuffer
+    class LRectangleVertexBuffer : public LPrimitiveVertexBuffer
     {
         
     public:
-        virtual const std::vector<Vertex>& getBuffer() override
+        virtual const std::vector<Vertex>& getVertexBuffer() override
         {
-            return verticesTriangle;
+            return verticesRectangle;
+        }
+
+        virtual const std::vector<uint16>& getIndexBuffer() override
+        {
+            return indicesRectangle;
         }
         
     protected:
 
-        static const std::vector<Vertex> verticesTriangle;
+        static const std::vector<Vertex> verticesRectangle;
+        static const std::vector<uint16> indicesRectangle;
     };
 
     class LPrimitiveMesh
@@ -75,14 +83,14 @@ namespace Primitives
         virtual ~LPrimitiveMesh();
 
         std::string typeName;
-        uint32 vertexCount;
+        uint32 indicesCount;
         
     protected:
         
         glm::mat4 modelMatrix = glm::mat4(1.0f);
     };
     
-    class LTriangle : public LPrimitiveMesh, public LTriangleVertexBuffer
+    class LRectangle : public LPrimitiveMesh, public LRectangleVertexBuffer
     {
     };
 }

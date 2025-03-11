@@ -682,11 +682,13 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
         {
             Primitives::LPrimitiveMesh& mesh = *it->lock();
             const auto& memoryBuffer = ObjectBuilder::getMemoryBuffer(mesh.typeName);
-            VkBuffer vertexBuffers[] = {memoryBuffer.buffer};
+            VkBuffer vertexBuffers[] = {memoryBuffer.vertexBuffer};
             VkDeviceSize offsets[] = {0};
             
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdDraw(commandBuffer, mesh.vertexCount, 1, 0, 0);
+            vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+            vkCmdDrawIndexed(commandBuffer, mesh.indicesCount, 1, 0, 0, 0);
         }
         else
         {

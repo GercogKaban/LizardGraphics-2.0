@@ -8,6 +8,6 @@ int main()
 	
 	LRenderer renderer(wnd);
 	
-    auto triangle = ObjectBuilder::construct<Primitives::LTriangle>();
+    auto triangle = ObjectBuilder::construct<Primitives::LRectangle>();
 	renderer.loop();
 }

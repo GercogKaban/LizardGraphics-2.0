@@ -13,8 +13,8 @@
 
 struct VkMemoryBuffer
 {
-    VkBuffer buffer;
-	VkDeviceMemory memory;
+    VkBuffer vertexBuffer, indexBuffer;
+	VkDeviceMemory vertexBufferMemory, indexBufferMemory;
 	uint64 memorySize;
 };
 
@@ -77,35 +77,54 @@ private:
 	VkResult rebuildShaders();
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
+
+    enum class BufferType : uint8
+    {
+	    Vertex,
+    	Index
+    };
+	
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	
 	template<typename Buffer>
-	void createVBO(const Buffer& vertices, VkMemoryBuffer& memoryBuffer)
+	void createObjectBuffer(const Buffer& arrData, VkMemoryBuffer& memoryBuffer, BufferType bufferType)
 	{
 		using T = typename Buffer::value_type;
-		memoryBuffer.memorySize = sizeof(T) * vertices.size();
+		memoryBuffer.memorySize = sizeof(T) * arrData.size();
 
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
 		createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-		void* data;
-		vkMapMemory(logicalDevice, stagingBufferMemory, 0, memoryBuffer.memorySize, 0, &data);
-		memcpy(data, vertices.data(), memoryBuffer.memorySize);
+		void* tmp;
+		vkMapMemory(logicalDevice, stagingBufferMemory, 0, memoryBuffer.memorySize, 0, &tmp);
+		memcpy(tmp, arrData.data(), memoryBuffer.memorySize);
 		vkUnmapMemory(logicalDevice, stagingBufferMemory);
-		
-		createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryBuffer.buffer, memoryBuffer.memory);
-		copyBuffer(stagingBuffer, memoryBuffer.buffer, memoryBuffer.memorySize);
+
+		if (bufferType == BufferType::Vertex)
+		{
+			createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryBuffer.vertexBuffer, memoryBuffer.vertexBufferMemory);
+			copyBuffer(stagingBuffer, memoryBuffer.vertexBuffer, memoryBuffer.memorySize);	
+		}
+
+		else
+		{
+			createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryBuffer.indexBuffer, memoryBuffer.indexBufferMemory);
+			copyBuffer(stagingBuffer, memoryBuffer.indexBuffer, memoryBuffer.memorySize);	
+		}
 
 		vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
 		vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
 	}
 
-	void destroyVBO(VkMemoryBuffer& memoryBuffer)
+	void destroyObjectBuffer(VkMemoryBuffer& memoryBuffer)
 	{
-		vkDestroyBuffer(logicalDevice, memoryBuffer.buffer, nullptr);
-		vkFreeMemory(logicalDevice, memoryBuffer.memory, nullptr);
+		vkDestroyBuffer(logicalDevice, memoryBuffer.indexBuffer, nullptr);
+		vkFreeMemory(logicalDevice, memoryBuffer.indexBufferMemory, nullptr);
+		
+		vkDestroyBuffer(logicalDevice, memoryBuffer.vertexBuffer, nullptr);
+		vkFreeMemory(logicalDevice, memoryBuffer.vertexBufferMemory, nullptr);
 	}
 	
 	uint32 findMemoryType(uint32 typeFilter, VkMemoryPropertyFlags properties);
@@ -231,7 +250,7 @@ public:
 		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
 		// TODO: it worth to implement UE FName alternative to save some memory
 		object->typeName = std::string(typeid(T).name());
-		object->vertexCount = object->getBuffer().size();
+		object->indicesCount = object->getIndexBuffer().size();
         
 		auto resCounter = objectsCounter.emplace(object->typeName, 0);
 		auto resBuffer = memoryBuffers.emplace(object->typeName, VkMemoryBuffer());
@@ -240,7 +259,8 @@ public:
 		{
 			if (LRenderer* renderer = LRenderer::get())
 			{
-				renderer->createVBO(object->getBuffer(), resBuffer.first->second);
+				renderer->createObjectBuffer(object->getVertexBuffer(), resBuffer.first->second, LRenderer::BufferType::Vertex);
+				renderer->createObjectBuffer(object->getIndexBuffer(), resBuffer.first->second, LRenderer::BufferType::Index);
 				renderer->addPrimitve(object);
 			}
 		}
@@ -262,7 +282,7 @@ public:
 			if (LRenderer* renderer = LRenderer::get())
 			{
 				// maybe we want to cache it, but not destroy
-				renderer->destroyVBO(resBuffer->second);
+				renderer->destroyObjectBuffer(resBuffer->second);
 			}
 		}
 	}
