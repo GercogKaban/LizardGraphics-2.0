@@ -5,27 +5,33 @@
 #include <optional>
 #include <memory>
 
+#include "LCore.h"
 #include "LWindow.h"
 #include "Primitives.h"
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-
-struct VkMemoryBuffer
-{
-    VkBuffer vertexBuffer, indexBuffer;
-	VkDeviceMemory vertexBufferMemory, indexBufferMemory;
-	uint64 memorySize;
-};
 
 class LRenderer
 {
 	friend class ObjectBuilder;
 	
 public:
+	
+	struct VkMemoryBuffer
+	{
+		VkBuffer vertexBuffer, indexBuffer;
+		VkDeviceMemory vertexBufferMemory, indexBufferMemory;
+		uint64 memorySize;
+	};
 
+	struct PushConstants
+	{
+		glm::mat4 mvpMatrix;
+	} pushConstants;
+	
+	
 	LRenderer(const LWindow& window);
 	~LRenderer();
+
+	void executeTickables();
 
 	void updateDelta()
 	{
@@ -37,6 +43,12 @@ public:
 	{
 		return std::chrono::duration<float>(currentFrameTime - previousFrameTime).count();
 	}
+
+	const glm::mat4& getProjection() const {return projection;}
+	const glm::mat4& getView() const {return view;}
+
+	void setProjection(float degrees, float zNear, float zFar);
+	void setView(const glm::mat4& view);
 
 	void loop();
 	static LRenderer* get()
@@ -72,11 +84,17 @@ private:
 	VkResult createSurface();
 	VkResult createImageViews();
 	VkResult createRenderPass();
+	VkResult createDescriptorSetLayout();
 	VkResult createGraphicsPipeline();
 	VkShaderModule createShaderModule(const std::vector<char>& code);
 	VkResult rebuildShaders();
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
+	
+	void initProjection();
+	void initView();
+
+	void updateProjView();
 
     enum class BufferType : uint8
     {
@@ -86,6 +104,7 @@ private:
 	
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+	void createUniformBuffers();
 	
 	template<typename Buffer>
 	void createObjectBuffer(const Buffer& arrData, VkMemoryBuffer& memoryBuffer, BufferType bufferType)
@@ -128,7 +147,9 @@ private:
 	}
 	
 	uint32 findMemoryType(uint32 typeFilter, VkMemoryPropertyFlags properties);
-	
+
+	VkResult createDescriptorPool();
+	VkResult createDescriptorSets();
 	VkResult createCommandBuffers();
 	VkResult createSyncObjects();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageIndex);
@@ -137,6 +158,9 @@ private:
 	void recreateSwapChain();
 
 	void drawFrame();
+
+	// TODO: needs to be optimized and also this temp rotation should be disabled
+	void updatePushConstants(const Primitives::LPrimitiveMesh& mesh);
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -167,7 +191,10 @@ private:
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const;
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
 
+	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
+
 	void addPrimitve(std::weak_ptr<Primitives::LPrimitiveMesh> ptr);
+	void addTickablePrimitive(std::weak_ptr<Primitives::LPrimitiveMesh> ptr);
 
 	// properties
 
@@ -203,10 +230,18 @@ private:
 
 	VkPipeline graphicsPipeline;
 	VkRenderPass renderPass;
+	VkDescriptorSetLayout descriptorSetLayout;
+	VkDescriptorPool descriptorPool;
+	std::vector<VkDescriptorSet> descriptorSets;
+	
 	VkPipelineLayout pipelineLayout;
 
 	VkCommandPool commandPool;
 	std::vector<VkCommandBuffer> commandBuffers;
+
+	std::vector<VkBuffer> uniformBuffers;
+	std::vector<VkDeviceMemory> uniformBuffersMemory;
+	std::vector<void*> uniformBuffersMapped;
 
 	std::vector<VkSemaphore> imageAvailableSemaphores;
 	std::vector<VkSemaphore> renderFinishedSemaphores;
@@ -225,16 +260,28 @@ private:
 	float fpsTimer = 0.0f;
 	uint32 fps = 0;
 
-	VkBuffer vertexBufferTriangle;
+	glm::mat4 projection;
+	
+    float degrees = 45.0f;
+    float zNear = 0.1f;
+	float zFar = 100.0f;
+	
+	glm::mat4 view;
+
+	// precalculated
+	glm::mat4 projView;
+
+	bool bNeedToUpdateProjView = false;
 	
 	std::vector<std::weak_ptr<Primitives::LPrimitiveMesh>> primitiveMeshes;
+	std::vector<std::weak_ptr<Primitives::LPrimitiveMesh>> tickableMeshes;
 };
 
 class ObjectBuilder
 {
 public:
 
-	static [[nodiscard]] const VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
+	static [[nodiscard]] const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
 	{
 		return memoryBuffers[primitiveName];
 	}
@@ -245,25 +292,30 @@ public:
 #ifndef NDEBUG
 		bIsConstructing = true;
 #endif
-
-		// TODO: need to be added to the std::vector
-		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
-		// TODO: it worth to implement UE FName alternative to save some memory
-		object->typeName = std::string(typeid(T).name());
-		object->indicesCount = object->getIndexBuffer().size();
-        
-		auto resCounter = objectsCounter.emplace(object->typeName, 0);
-		auto resBuffer = memoryBuffers.emplace(object->typeName, VkMemoryBuffer());
 		
-		if (resCounter.first->second++ == 0)
+		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
+		
+		// TODO: it worth to implement UE FName alternative to save some memory
+		const_cast<std::string&>(object->typeName) = std::string(typeid(T).name());
+		const_cast<uint32&>(object->indicesCount) = object->getIndexBuffer().size();
+		if (LRenderer* renderer = LRenderer::get())
 		{
-			if (LRenderer* renderer = LRenderer::get())
+			auto resCounter = objectsCounter.emplace(object->typeName, 0);
+			auto resBuffer = memoryBuffers.emplace(object->typeName, LRenderer::VkMemoryBuffer());
+		
+			if (resCounter.first->second++ == 0)
 			{
 				renderer->createObjectBuffer(object->getVertexBuffer(), resBuffer.first->second, LRenderer::BufferType::Vertex);
 				renderer->createObjectBuffer(object->getIndexBuffer(), resBuffer.first->second, LRenderer::BufferType::Index);
-				renderer->addPrimitve(object);
 			}
-		}
+
+			renderer->addPrimitve(object);
+
+			if constexpr (std::is_base_of<LTickable, T>::value)
+			{
+				renderer->addTickablePrimitive(object);
+			}
+	    }
 #ifndef NDEBUG
 		bIsConstructing = false;
 #endif
@@ -294,7 +346,7 @@ public:
 protected:
         
 	static std::unordered_map<std::string, int32> objectsCounter;
-	static std::unordered_map<std::string, VkMemoryBuffer> memoryBuffers;
+	static std::unordered_map<std::string, LRenderer::VkMemoryBuffer> memoryBuffers;
 #ifndef NDEBUG
 	static bool bIsConstructing;
 #endif

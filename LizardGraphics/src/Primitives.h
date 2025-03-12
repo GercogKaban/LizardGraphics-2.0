@@ -5,7 +5,7 @@
 
 #include "globals.h"
 #include "vulkan/vulkan.h"
-#include "glm/glm.hpp"
+#include "glm/vec4.hpp"
 
 namespace Primitives
 {
@@ -52,26 +52,26 @@ namespace Primitives
         virtual ~LPrimitiveVertexBuffer() = default;
     };
     
-    class LRectangleVertexBuffer : public LPrimitiveVertexBuffer
+    class LPlaneVertexBuffer : public LPrimitiveVertexBuffer
     {
         
     public:
         virtual const std::vector<Vertex>& getVertexBuffer() override
         {
-            return verticesRectangle;
+            return verticesPlane;
         }
 
         virtual const std::vector<uint16>& getIndexBuffer() override
         {
-            return indicesRectangle;
+            return indicesPlane;
         }
         
     protected:
 
-        static const std::vector<Vertex> verticesRectangle;
-        static const std::vector<uint16> indicesRectangle;
+        static const std::vector<Vertex> verticesPlane;
+        static const std::vector<uint16> indicesPlane;
     };
-
+    
     class LPrimitiveMesh
     {
         LPrimitiveMesh(const LPrimitiveMesh&) = delete;
@@ -82,15 +82,44 @@ namespace Primitives
         LPrimitiveMesh();
         virtual ~LPrimitiveMesh();
 
-        std::string typeName;
-        uint32 indicesCount;
+        bool isModified() const {return bModified;}
+
+        const glm::mat4& getModelMatrix() const {return modelMatrix;}
+        void setModelMatrix(const glm::mat4& modelMatrix)
+        {
+            this->modelMatrix = modelMatrix;
+            bModified = true;
+        }
+        
+        void translate(const glm::vec3& translation)
+        {
+            modelMatrix = glm::translate(modelMatrix, translation);
+            bModified = true;
+        }
+
+        void rotate(float angle, const glm::vec3& axis)
+        {
+            modelMatrix = glm::rotate(modelMatrix, angle, axis);
+            bModified = true;
+        }
+
+        void scale(const glm::vec3& scale)
+        {
+            modelMatrix = glm::scale(modelMatrix, scale);
+            bModified = true;
+        }
+
+        // some stupid hack, they are const only for user, so their values will be initialized soon
+        const std::string typeName = "";
+        const uint32 indicesCount = 0;
         
     protected:
         
         glm::mat4 modelMatrix = glm::mat4(1.0f);
+        mutable bool bModified = true;
     };
     
-    class LRectangle : public LPrimitiveMesh, public LRectangleVertexBuffer
+    class LPlane : public LPrimitiveMesh, public LPlaneVertexBuffer
     {
     };
 }

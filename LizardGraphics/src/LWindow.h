@@ -5,13 +5,24 @@
 class LWindow
 {
 public:
-
+	enum class WindowMode
+	{
+		Windowed,
+		Fullscreen,
+		WindowedFullscreen,
+	};
 	struct LWindowSpecs
 	{
+		WindowMode wndMode = WindowMode::WindowedFullscreen;
 		std::string wndName;
-		int16 wndWidth;
-		int16 wndHeight;
+
 		bool bVsync = false;
+
+		// ignored if you choose Fullscreen/Windowed fullscreen mods
+		int32 wndWidth;
+
+		// ignored if you choose Fullscreen/Windowed fullscreen mods
+		int32 wndHeight;
 	};
 
 	LWindow(const struct LWindowSpecs& wndSpecs);

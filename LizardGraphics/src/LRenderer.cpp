@@ -1,4 +1,11 @@
 #include "pch.h"
+
+#define private public
+#define protected public
+#include "Primitives.h"
+#undef private
+#undef protected
+
 #include "LRenderer.h"
 #include "Util.h"
 
@@ -7,13 +14,12 @@
 
 #include "LWindow.h"
 #include "vulkan/vulkan.h"
-#include "Primitives.h"
 
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
 
 std::unordered_map<std::string, int32> ObjectBuilder::objectsCounter;
-std::unordered_map<std::string, VkMemoryBuffer> ObjectBuilder::memoryBuffers;
+std::unordered_map<std::string, LRenderer::VkMemoryBuffer> ObjectBuilder::memoryBuffers;
 
 #ifndef NDEBUG
 bool ObjectBuilder::bIsConstructing = false;
@@ -42,6 +48,21 @@ LRenderer::~LRenderer()
     thisPtr = nullptr;
 }
 
+void LRenderer::executeTickables()
+{
+    for (auto it = tickableMeshes.begin(); it != tickableMeshes.end(); ++it)
+    {
+        if (!it->expired())
+        {
+            dynamic_cast<LTickable*>(it->lock().get())->tick(getDelta());
+        }
+        else
+        {
+            it = primitiveMeshes.erase(it);
+        }
+    }
+}
+
 void LRenderer::loop()
 {
     while (window && !glfwWindowShouldClose(window)) 
@@ -53,8 +74,15 @@ void LRenderer::loop()
             fpsTimer = 0.0f;
             fps = 0;
         }
-        
+
+        executeTickables();
         glfwPollEvents();
+
+        if (bNeedToUpdateProjView)
+        {
+            updateProjView();
+        }
+        
         drawFrame();
         fps++;
     }
@@ -69,12 +97,20 @@ void LRenderer::init()
     HANDLE_VK_ERROR(pickPhysicalDevice())
     HANDLE_VK_ERROR(createLogicalDevice())
     HANDLE_VK_ERROR(createSwapChain())
+
+    initProjection();
+    initView();
+    
     HANDLE_VK_ERROR(createImageViews())
     HANDLE_VK_ERROR(rebuildShaders())
     HANDLE_VK_ERROR(createRenderPass())
+    HANDLE_VK_ERROR(createDescriptorSetLayout())
     HANDLE_VK_ERROR(createGraphicsPipeline())
     HANDLE_VK_ERROR(createFramebuffers())
     HANDLE_VK_ERROR(createCommandPool())
+    createUniformBuffers();
+    HANDLE_VK_ERROR(createDescriptorPool())
+    HANDLE_VK_ERROR(createDescriptorSets())
     HANDLE_VK_ERROR(createCommandBuffers())
     HANDLE_VK_ERROR(createSyncObjects())
 }
@@ -83,8 +119,17 @@ void LRenderer::cleanup()
 {
     cleanupSwapChain();
 
+    // for (uint32 i = 0; i < maxFramesInFlight; ++i)
+    // {
+    //     vkDestroyBuffer(logicalDevice, uniformBuffers[i], nullptr);
+    //     vkFreeMemory(logicalDevice, uniformBuffersMemory[i], nullptr);
+    // }
+
+    vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+
     vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
-    vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+    //vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
     vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
     
     for (uint32 i = 0; i < maxFramesInFlight; ++i)
@@ -305,11 +350,27 @@ VkResult LRenderer::createRenderPass()
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
     renderPassInfo.pDependencies = nullptr;
-    renderPassInfo.dependencyCount = 0;
     renderPassInfo.dependencyCount = 1;
     renderPassInfo.pDependencies = &dependency;
 
     return vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass);
+}
+
+VkResult LRenderer::createDescriptorSetLayout()
+{
+    VkDescriptorSetLayoutBinding uboLayoutBinding{};
+    uboLayoutBinding.binding = 0;
+    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboLayoutBinding.descriptorCount = 1;
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    uboLayoutBinding.pImmutableSamplers = nullptr; // Optional
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &uboLayoutBinding;
+
+    return vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &descriptorSetLayout);
 }
 
 VkResult LRenderer::createGraphicsPipeline()
@@ -362,7 +423,7 @@ VkResult LRenderer::createGraphicsPipeline()
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.depthBiasConstantFactor = 0.0f; // Optional
     rasterizer.depthBiasClamp = 0.0f; // Optional
@@ -408,11 +469,18 @@ VkResult LRenderer::createGraphicsPipeline()
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.dynamicStateCount = static_cast<uint32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
+    
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0; // Optional
-    pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
+    pipelineLayoutInfo.setLayoutCount = 1; // Optional
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     HANDLE_VK_ERROR(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &pipelineLayout))
 
@@ -531,8 +599,40 @@ VkResult LRenderer::createCommandPool()
     return vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &commandPool);
 }
 
+
+void LRenderer::setProjection(float degrees, float zNear, float zFar)
+{
+    glm::mat4 proj = glm::perspective(glm::radians(degrees), swapChainExtent.width / (float) swapChainExtent.height, zNear, zFar);
+    proj[1][1] *= -1;
+    projection = proj;
+    bNeedToUpdateProjView = true;
+}
+
+void LRenderer::setView(const glm::mat4& viewIn)
+{
+    view = viewIn;
+    bNeedToUpdateProjView = true;
+}
+
+void LRenderer::initProjection()
+{
+    setProjection(degrees, zNear, zFar);
+}
+
+void LRenderer::initView()
+{
+    glm::mat4 viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    setView(viewMatrix);
+}
+
+void LRenderer::updateProjView()
+{
+    projView = projection * view;
+    bNeedToUpdateProjView = false;
+}
+
 void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-    VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+                             VkBuffer& buffer, VkDeviceMemory& bufferMemory)
 {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -588,6 +688,21 @@ void LRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize 
     vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
 }
 
+void LRenderer::createUniformBuffers()
+{
+    // VkDeviceSize bufferSize = sizeof(PushConstants);
+    //
+    // uniformBuffers.resize(maxFramesInFlight);
+    // uniformBuffersMemory.resize(maxFramesInFlight);
+    // uniformBuffersMapped.resize(maxFramesInFlight);
+    //
+    // for (uint32 i = 0; i < maxFramesInFlight; ++i)
+    // {
+    //     createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+    //     vkMapMemory(logicalDevice, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+    // }
+}
+
 VkResult LRenderer::createCommandBuffers()
 {
     commandBuffers.resize(maxFramesInFlight);
@@ -615,6 +730,54 @@ uint32 LRenderer::findMemoryType(uint32 typeFilter, VkMemoryPropertyFlags proper
     }
 
     RAISE_VK_ERROR("Failed to find suitable memory type!")
+}
+
+VkResult LRenderer::createDescriptorPool()
+{
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = static_cast<uint32>(maxFramesInFlight);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = static_cast<uint32_t>(maxFramesInFlight);
+
+    return vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &descriptorPool);
+}
+
+VkResult LRenderer::createDescriptorSets()
+{
+    // std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
+    // VkDescriptorSetAllocateInfo allocInfo{};
+    // allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    // allocInfo.descriptorPool = descriptorPool;
+    // allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight);
+    // allocInfo.pSetLayouts = layouts.data();
+    //
+    // descriptorSets.resize(maxFramesInFlight);
+    // HANDLE_VK_ERROR(vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()))
+    //     
+    // for (uint32 i = 0; i < maxFramesInFlight; ++i)
+    // {
+    //     VkDescriptorBufferInfo bufferInfo{};
+    //     bufferInfo.buffer = uniformBuffers[i];
+    //     bufferInfo.offset = 0;
+    //     bufferInfo.range = sizeof(PushConstants);
+    //
+    //     VkWriteDescriptorSet descriptorWrite{};
+    //     descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    //     descriptorWrite.dstSet = descriptorSets[i];
+    //     descriptorWrite.dstBinding = 0;
+    //     descriptorWrite.dstArrayElement = 0;
+    //     descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    //     descriptorWrite.descriptorCount = 1;
+    //     descriptorWrite.pBufferInfo = &bufferInfo;
+    //
+    //     vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
+    // }
+    return VK_SUCCESS;
 }
 
 VkResult LRenderer::createSyncObjects()
@@ -676,18 +839,23 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+    //vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+    
     for (auto it = primitiveMeshes.begin(); it != primitiveMeshes.end(); ++it)
     {
         if (!it->expired())
         {
             Primitives::LPrimitiveMesh& mesh = *it->lock();
+            
+            updatePushConstants(mesh);
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
+            
             const auto& memoryBuffer = ObjectBuilder::getMemoryBuffer(mesh.typeName);
             VkBuffer vertexBuffers[] = {memoryBuffer.vertexBuffer};
             VkDeviceSize offsets[] = {0};
             
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
             vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-
             vkCmdDrawIndexed(commandBuffer, mesh.indicesCount, 1, 0, 0, 0);
         }
         else
@@ -733,6 +901,8 @@ void LRenderer::recreateSwapChain()
     createSwapChain();
     createImageViews();
     createFramebuffers();
+
+    initProjection();
 }
 
 void LRenderer::drawFrame()
@@ -751,7 +921,7 @@ void LRenderer::drawFrame()
     {
         RAISE_VK_ERROR(result)
     }
-
+    
     vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
     
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
@@ -799,6 +969,12 @@ void LRenderer::drawFrame()
     }
 
     currentFrame = (currentFrame + 1) % maxFramesInFlight;
+}
+
+void LRenderer::updatePushConstants(const Primitives::LPrimitiveMesh& mesh)
+{
+    glm::mat4 model = mesh.getModelMatrix();
+    pushConstants.mvpMatrix = projView * model;
 }
 
 VkResult LRenderer::pickPhysicalDevice()
@@ -1086,9 +1262,21 @@ VkExtent2D LRenderer::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
     return actualExtent;
 }
 
+uint32 LRenderer::getPushConstantSize(VkPhysicalDevice physicalDeviceIn) const
+{
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(physicalDeviceIn, &deviceProperties);
+    return deviceProperties.limits.maxPushConstantsSize;
+}
+
 void LRenderer::addPrimitve(std::weak_ptr<Primitives::LPrimitiveMesh> ptr)
 {
     primitiveMeshes.push_back(ptr);
+}
+
+void LRenderer::addTickablePrimitive(std::weak_ptr<Primitives::LPrimitiveMesh> ptr)
+{
+    tickableMeshes.push_back(ptr);
 }
 
 void LRenderer::framebufferResizeCallback(GLFWwindow* window, int32 width, int32 height)
