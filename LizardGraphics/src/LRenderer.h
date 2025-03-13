@@ -281,13 +281,13 @@ class ObjectBuilder
 {
 public:
 
-	static [[nodiscard]] const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
+    [[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
 	{
 		return memoryBuffers[primitiveName];
 	}
 
 	template<typename T>
-	static [[nodiscard]] std::shared_ptr<T> construct()
+	[[nodiscard]] static std::shared_ptr<T> construct()
 	{
 #ifndef NDEBUG
 		bIsConstructing = true;

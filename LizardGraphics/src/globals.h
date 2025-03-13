@@ -37,7 +37,7 @@ throw std::runtime_error("");\
 #ifdef __APPLE__
 typedef char __int8;
 typedef short __int16;
-typedef long __int32;
+typedef int __int32;
 typedef long long __int64;
 #endif
 #endif
