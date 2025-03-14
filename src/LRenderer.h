@@ -4,6 +4,9 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include <chrono>
+#include <filesystem>
+#include <unordered_map>
 
 #include "LCore.h"
 #include "LWindow.h"
@@ -87,7 +90,6 @@ private:
 	VkResult createDescriptorSetLayout();
 	VkResult createGraphicsPipeline();
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
-	VkResult rebuildShaders();
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
 	

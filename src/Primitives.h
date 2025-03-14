@@ -5,7 +5,8 @@
 
 #include "globals.h"
 #include "vulkan/vulkan.h"
-#include "glm/vec4.hpp"
+#include "glm/gtc/matrix_transform.hpp"
+#include "glm/glm.hpp"
 
 namespace Primitives
 {
