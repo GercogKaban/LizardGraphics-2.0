@@ -1,14 +1,14 @@
 import os
 
-directory = os.path.join(os.getcwd(), 'src\shaders')
+directory = os.path.join(os.getcwd(), 'src', 'shaders')
 source_directory = os.path.join(os.getcwd(), 'src')
 vulkan_sdk = os.environ['VULKAN_SDK']
-shader_compiler_path = vulkan_sdk + '\Bin\glslc'
+shader_compiler_path = os.path.join(vulkan_sdk,'Bin', 'glslc')
 
 print('VULKAN_SDK=' + vulkan_sdk)
 print('shaders directory=' + directory)
 
-generated_file = open(source_directory + '\gen_shaders.cxx', 'w')
+generated_file = open(os.path.join(source_directory,'gen_shaders.cxx'), 'w')
 generated_file.write("#pragma once\n")
 generated_file.write('#include <vector>\n\n')
     

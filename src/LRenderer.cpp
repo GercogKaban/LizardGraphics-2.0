@@ -105,7 +105,6 @@ void LRenderer::init()
     initView();
     
     HANDLE_VK_ERROR(createImageViews())
-    HANDLE_VK_ERROR(rebuildShaders())
     HANDLE_VK_ERROR(createRenderPass())
     HANDLE_VK_ERROR(createDescriptorSetLayout())
     HANDLE_VK_ERROR(createGraphicsPipeline())
@@ -520,48 +519,6 @@ VkShaderModule LRenderer::createShaderModule(const std::vector<uint8_t>& code)
     VkShaderModule shaderModule;
     HANDLE_VK_ERROR(vkCreateShaderModule(logicalDevice, &createInfo, nullptr, &shaderModule))
     return shaderModule;
-}
-
-VkResult LRenderer::rebuildShaders()
-{
-    return VK_SUCCESS;
-    namespace fs = std::filesystem;
-    
-    std::string vulkanEnvVariable = Util::getEnvironmentVariable("VULKAN_SDK");
-
-    if (vulkanEnvVariable.empty())
-    {
-        return VK_ERROR_UNKNOWN;
-    }
-
-#ifdef _WINDOWS
-    fs::path vulkanShaderCompilerPath = fs::absolute(vulkanEnvVariable) / "Bin" / "glslc.exe";
-#else
-    fs::path vulkanShaderCompilerPath = fs::absolute(vulkanEnvVariable) / "Bin" / "glslc";
-#endif
-    
-    if (!is_regular_file(vulkanShaderCompilerPath))
-    {
-        return VK_ERROR_UNKNOWN;
-    }
-
-    fs::path currentPath = fs::current_path();
-
-    const auto& files = Util::getAllFilesInDirectory(currentPath, {".vert", ".frag"});
-
-    if (files.size() > 0)
-    {
-        shadersPath = files[0].parent_path();
-    }
-    
-    for (auto& file : files)
-    {
-        fs::path outPath = shadersPath / file.filename().replace_extension(".spv");
-        std::string command = std::format("{} {} -o {}", vulkanShaderCompilerPath.string(), file.string(), outPath.string());
-        Util::executeCommand(command);   
-    }
-
-    return VK_SUCCESS;
 }
 
 VkResult LRenderer::createFramebuffers()

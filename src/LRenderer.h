@@ -47,7 +47,7 @@ public:
 	const glm::mat4& getProjection() const {return projection;}
 	const glm::mat4& getView() const {return view;}
 
-	void setProjection(float degrees, float zNear, float zFar);
+	void setProjection(float degrees, float zNear = 0.1f, float zFar = 100.0f);
 	void setView(const glm::mat4& view);
 
 	void loop();
