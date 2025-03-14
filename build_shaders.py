@@ -1,7 +1,8 @@
 import os
 
-directory = os.path.join(os.getcwd(), 'src', 'shaders')
-source_directory = os.path.join(os.getcwd(), 'src')
+project_source_dir = os.getenv("PROJECT_SOURCE_DIR")
+directory = os.path.join(project_source_dir, 'src', 'shaders')
+source_directory = os.path.join(project_source_dir, 'src')
 vulkan_sdk = os.environ['VULKAN_SDK']
 shader_compiler_path = os.path.join(vulkan_sdk,'Bin', 'glslc')
 

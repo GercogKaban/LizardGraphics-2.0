@@ -30,7 +30,7 @@ add_subdirectory(DesktopExample)
 #/////////////////////////////////////////////////
 
 add_custom_target(run_script ALL 
-    COMMAND ${PYTHON_COMMAND} build_shaders.py
+    COMMAND ${CMAKE_COMMAND} -E env PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${PYTHON_COMMAND} ${PROJECT_SOURCE_DIR}/build_shaders.py
     COMMENT "Running script before build"
 )
 
