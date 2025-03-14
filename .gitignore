@@ -313,3 +313,7 @@ android-ndk-r25b
 *.plist
 *.pbxproj
 *.cxx
+*.a
+*.ninja_deps
+*.ninja_log
+*.ninja
