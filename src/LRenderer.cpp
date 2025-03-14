@@ -1,5 +1,6 @@
 #include "pch.h"
 
+//
 #define private public
 #define protected public
 #include "Primitives.h"
@@ -14,6 +15,8 @@
 
 #include "LWindow.h"
 #include "vulkan/vulkan.h"
+
+#include "src/gen_shaders.cxx"
 
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
@@ -375,11 +378,8 @@ VkResult LRenderer::createDescriptorSetLayout()
 
 VkResult LRenderer::createGraphicsPipeline()
 {
-    auto vertShaderCode = Util::readFile((shadersPath / "genericVert.spv").string());
-    auto fragShaderCode = Util::readFile((shadersPath / "genericFrag.spv").string());
-
-    VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-    VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+    VkShaderModule vertShaderModule = createShaderModule(genericVert);
+    VkShaderModule fragShaderModule = createShaderModule(genericFrag);
     
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -510,7 +510,7 @@ VkResult LRenderer::createGraphicsPipeline()
     return VK_SUCCESS;
 }
 
-VkShaderModule LRenderer::createShaderModule(const std::vector<char>& code)
+VkShaderModule LRenderer::createShaderModule(const std::vector<uint8_t>& code)
 {
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -524,6 +524,7 @@ VkShaderModule LRenderer::createShaderModule(const std::vector<char>& code)
 
 VkResult LRenderer::rebuildShaders()
 {
+    return VK_SUCCESS;
     namespace fs = std::filesystem;
     
     std::string vulkanEnvVariable = Util::getEnvironmentVariable("VULKAN_SDK");

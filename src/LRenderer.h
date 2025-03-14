@@ -86,7 +86,7 @@ private:
 	VkResult createRenderPass();
 	VkResult createDescriptorSetLayout();
 	VkResult createGraphicsPipeline();
-	VkShaderModule createShaderModule(const std::vector<char>& code);
+	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
 	VkResult rebuildShaders();
 	VkResult createFramebuffers();
 	VkResult createCommandPool();

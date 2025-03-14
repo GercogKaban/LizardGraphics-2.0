@@ -19,7 +19,7 @@ protected:
 
 int main()
 { 
-	LWindow::LWindowSpecs wndSpecs{LWindow::WindowMode::WindowedFullscreen,"LGWindow",false, 1280, 720 };
+	LWindow::LWindowSpecs wndSpecs{LWindow::WindowMode::Windowed,"LGWindow",false, 1280, 720 };
 	LWindow wnd(wndSpecs);
 	
 	LRenderer renderer(wnd);

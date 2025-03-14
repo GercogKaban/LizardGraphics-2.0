@@ -40,10 +40,12 @@ LWindow::WindowInitRes LWindow::init(const LWindowSpecs& wndSpecs)
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    const int32 width = specs.wndMode == WindowMode::Windowed? specs.wndWidth : mode->width;
-	const int32 height = specs.wndMode == WindowMode::Windowed? specs.wndHeight : mode->height;
+	bool bWindowed = specs.wndMode == WindowMode::Windowed;
 	
-	if (_window = glfwCreateWindow(width, height, specs.wndName.data(), glfwGetPrimaryMonitor(), nullptr);
+    const int32 width = bWindowed? specs.wndWidth : mode->width;
+	const int32 height = bWindowed? specs.wndHeight : mode->height;
+	
+	if (_window = glfwCreateWindow(width, height, specs.wndName.data(), bWindowed? nullptr : glfwGetPrimaryMonitor(), nullptr);
 		!_window)
 	{
 		return WindowInitRes::GLFW_CREATE_WINDOW_ERROR;
