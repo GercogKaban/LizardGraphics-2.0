@@ -44,11 +44,14 @@ LWindow::WindowInitRes LWindow::init(const LWindowSpecs& wndSpecs)
 	
     const int32 width = bWindowed? specs.wndWidth : mode->width;
 	const int32 height = bWindowed? specs.wndHeight : mode->height;
+
 	
 	if (_window = glfwCreateWindow(width, height, specs.wndName.data(), bWindowed? nullptr : glfwGetPrimaryMonitor(), nullptr);
 		!_window)
 	{
 		return WindowInitRes::GLFW_CREATE_WINDOW_ERROR;
 	}
+
+	glfwSetInputMode(_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	return WindowInitRes::SUCCESS;
 }

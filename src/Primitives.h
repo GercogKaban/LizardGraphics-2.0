@@ -10,6 +10,11 @@
 
 namespace LG
 {
+    class LDummy
+    {
+
+    };
+
     class LPrimitiveVertexBuffer
     {
     public:

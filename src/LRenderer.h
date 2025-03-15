@@ -8,7 +8,6 @@
 #include <filesystem>
 #include <unordered_map>
 
-#include "LCore.h"
 #include "LWindow.h"
 #include "Primitives.h"
 
@@ -20,7 +19,7 @@
     
 class LRenderer
 {
-	friend class ObjectBuilder;
+	friend class RenderObjectBuilder;
 	
 public:
 	
@@ -45,32 +44,27 @@ public:
 	LRenderer(const LWindow& window);
 	~LRenderer();
 
-	void executeTickables();
-
-	void updateDelta()
-	{
-		previousFrameTime = currentFrameTime;
-		currentFrameTime = std::chrono::high_resolution_clock::now();
-	}
-	
-	float getDelta() const
-	{
-		return std::chrono::duration<float>(currentFrameTime - previousFrameTime).count();
-	}
-
 	const glm::mat4& getProjection() const {return projection;}
 	const glm::mat4& getView() const {return view;}
+
+	GLFWwindow* getWindow() { return window; }
 
 	void setProjection(float degrees, float zNear = 0.1f, float zFar = 100.0f);
 	void setView(const glm::mat4& view);
 
-	void loop();
+	glm::vec3 getCameraUp() const;
+	glm::vec3 getCameraFront() const;
+	glm::vec3 getCameraPosition() const;
+
+	void setCameraFront(const glm::vec3& cameraFront);
+	void setCameraPosition(const glm::vec3& cameraPosition);
+
 	static LRenderer* get()
 	{
 		return thisPtr;
 	}
 
-private:
+protected:
 
 	static LRenderer* thisPtr;
 
@@ -207,7 +201,6 @@ private:
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 
 	void addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr);
-	void addTickablePrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr);
 	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr);)
 
 	// properties
@@ -270,17 +263,15 @@ private:
 	const int32 maxFramesInFlight = 2;
 	uint32 currentFrame = 0;
 
-	std::chrono::high_resolution_clock::time_point currentFrameTime = std::chrono::high_resolution_clock::now();
-	std::chrono::high_resolution_clock::time_point previousFrameTime = std::chrono::high_resolution_clock::now();
-
-	float fpsTimer = 0.0f;
-	uint32 fps = 0;
-
 	glm::mat4 projection;
 	
-    float degrees = 45.0f;
+    float degrees = 80.0f;
     float zNear = 0.1f;
 	float zFar = 100.0f;
+
+	glm::vec3 cameraPosition = glm::vec3(0.0f, 0.0f, 3.0f);
+	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 	
 	glm::mat4 view;
 
@@ -291,17 +282,16 @@ private:
 	
 	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> debugMeshes;
 	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> primitiveMeshes;
-	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> tickableMeshes;
 };
 
-class ObjectBuilder
+class RenderObjectBuilder
 {
-public:
+protected:
 
-    [[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
-	{
-		return memoryBuffers[primitiveName];
-	}
+	friend class LG::LPrimitiveMesh;
+	friend class LRenderer;
+	friend class LEngine;
+	friend class ObjectBuilder;
 
 	template<typename T>
 	[[nodiscard]] static std::shared_ptr<T> construct()
@@ -312,7 +302,7 @@ public:
 
 	}
 
-DEBUG_CODE(
+	DEBUG_CODE(
 	template<typename T>
 	[[nodiscard]] static std::shared_ptr<T> constructDebug()
 	{
@@ -325,12 +315,12 @@ DEBUG_CODE(
 	template<typename T>
 	[[nodiscard]] static std::shared_ptr<T> constructImpl()
 	{
-DEBUG_CODE(
-		bIsConstructing = true;
-)
-		
+		DEBUG_CODE(
+			bIsConstructing = true;
+			)
+
 		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
-		
+
 		// TODO: it worth to implement UE FName alternative to save some memory
 		const_cast<std::string&>(object->typeName) = std::string(typeid(T).name());
 		const_cast<uint32&>(object->indicesCount) = object->getIndexBuffer().size();
@@ -338,23 +328,18 @@ DEBUG_CODE(
 		{
 			auto resCounter = objectsCounter.emplace(object->typeName, 0);
 			auto resBuffer = memoryBuffers.emplace(object->typeName, LRenderer::VkMemoryBuffer());
-		
+
 			if (resCounter.first->second++ == 0)
 			{
 				renderer->createObjectBuffer(object->getVertexBuffer(), resBuffer.first->second, LRenderer::BufferType::Vertex);
 				renderer->createObjectBuffer(object->getIndexBuffer(), resBuffer.first->second, LRenderer::BufferType::Index);
 			}
+		}
+		DEBUG_CODE(
+			bIsConstructing = false;
+		)
 
-			if constexpr (std::is_base_of<LTickable, T>::value)
-			{
-				renderer->addTickablePrimitive(object);
-			}
-	    }
-DEBUG_CODE(
-		bIsConstructing = false;
-)
-        
-		return object;
+			return object;
 	}
 
 	template<typename T>
@@ -373,16 +358,22 @@ DEBUG_CODE(
 		}
 	}
 
-DEBUG_CODE(
-	static bool isConstructing() {return bIsConstructing;}
-)
-        
+	[[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
+	{
+		return memoryBuffers[primitiveName];
+	}
+
+	DEBUG_CODE(
+		static bool isConstructing() { return bIsConstructing; }
+	)
+
 protected:
-        
+
 	static std::unordered_map<std::string, int32> objectsCounter;
 	static std::unordered_map<std::string, LRenderer::VkMemoryBuffer> memoryBuffers;
-DEBUG_CODE(
-	static bool bIsConstructing;
-)
-};   
+
+	DEBUG_CODE(
+		static bool bIsConstructing;
+	)
+};
 

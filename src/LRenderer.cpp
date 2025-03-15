@@ -18,15 +18,14 @@
 
 #include "gen_shaders.cxx"
 
+DEBUG_CODE(
+    bool RenderObjectBuilder::bIsConstructing = false;
+)
+
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
-
-std::unordered_map<std::string, int32> ObjectBuilder::objectsCounter;
-std::unordered_map<std::string, LRenderer::VkMemoryBuffer> ObjectBuilder::memoryBuffers;
-
-DEBUG_CODE(
-    bool ObjectBuilder::bIsConstructing = false;
-)
+std::unordered_map<std::string, int32> RenderObjectBuilder::objectsCounter;
+std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderObjectBuilder::memoryBuffers;
 
 LRenderer::LRenderer(const LWindow& window)
 {
@@ -49,47 +48,6 @@ LRenderer::~LRenderer()
 {
     cleanup();
     thisPtr = nullptr;
-}
-
-void LRenderer::executeTickables()
-{
-    for (auto it = tickableMeshes.begin(); it != tickableMeshes.end(); ++it)
-    {
-        if (!it->expired())
-        {
-            dynamic_cast<LTickable*>(it->lock().get())->tick(getDelta());
-        }
-        else
-        {
-            it = tickableMeshes.erase(it);
-        }
-    }
-}
-
-void LRenderer::loop()
-{
-    while (window && !glfwWindowShouldClose(window)) 
-    {
-        updateDelta();
-        fpsTimer+= getDelta();
-        if (fpsTimer >= 1.0f)
-        {
-            fpsTimer = 0.0f;
-            fps = 0;
-        }
-
-        executeTickables();
-        glfwPollEvents();
-
-        if (bNeedToUpdateProjView)
-        {
-            updateProjView();
-        }
-        
-        drawFrame();
-        fps++;
-    }
-    vkDeviceWaitIdle(logicalDevice);
 }
 
 void LRenderer::init()
@@ -592,6 +550,33 @@ void LRenderer::setView(const glm::mat4& viewIn)
     bNeedToUpdateProjView = true;
 }
 
+glm::vec3 LRenderer::getCameraUp() const
+{
+    return cameraUp;
+}
+
+glm::vec3 LRenderer::getCameraFront() const
+{
+    return cameraFront;
+}
+
+glm::vec3 LRenderer::getCameraPosition() const
+{
+    return cameraPosition;
+}
+
+void LRenderer::setCameraFront(const glm::vec3& cameraFront)
+{
+    this->cameraFront = cameraFront;
+    setView(glm::lookAt(cameraPosition, cameraPosition + cameraFront, cameraUp));
+}
+
+void LRenderer::setCameraPosition(const glm::vec3& cameraPosition)
+{
+    this->cameraPosition = cameraPosition;
+    setView(glm::lookAt(cameraPosition, cameraPosition + cameraFront, cameraUp));
+}
+
 void LRenderer::initProjection()
 {
     setProjection(degrees, zNear, zFar);
@@ -599,7 +584,7 @@ void LRenderer::initProjection()
 
 void LRenderer::initView()
 {
-    glm::mat4 viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::mat4 viewMatrix = glm::lookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
     setView(viewMatrix);
 }
 
@@ -827,7 +812,7 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
                     updatePushConstants(mesh);
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                    const auto& memoryBuffer = ObjectBuilder::getMemoryBuffer(mesh.typeName);
+                    const auto& memoryBuffer = RenderObjectBuilder::getMemoryBuffer(mesh.typeName);
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 
@@ -1259,11 +1244,6 @@ uint32 LRenderer::getPushConstantSize(VkPhysicalDevice physicalDeviceIn) const
 void LRenderer::addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr)
 {
     primitiveMeshes.push_back(ptr);
-}
-
-void LRenderer::addTickablePrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr)
-{
-    tickableMeshes.push_back(ptr);
 }
 
 DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr)
