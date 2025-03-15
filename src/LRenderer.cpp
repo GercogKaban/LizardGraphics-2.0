@@ -24,9 +24,9 @@ bool LRenderer::bFramebufferResized = false;
 std::unordered_map<std::string, int32> ObjectBuilder::objectsCounter;
 std::unordered_map<std::string, LRenderer::VkMemoryBuffer> ObjectBuilder::memoryBuffers;
 
-#ifndef NDEBUG
-bool ObjectBuilder::bIsConstructing = false;
-#endif
+DEBUG_CODE(
+    bool ObjectBuilder::bIsConstructing = false;
+)
 
 LRenderer::LRenderer(const LWindow& window)
 {
@@ -61,7 +61,7 @@ void LRenderer::executeTickables()
         }
         else
         {
-            it = primitiveMeshes.erase(it);
+            it = tickableMeshes.erase(it);
         }
     }
 }
@@ -107,7 +107,18 @@ void LRenderer::init()
     HANDLE_VK_ERROR(createImageViews())
     HANDLE_VK_ERROR(createRenderPass())
     HANDLE_VK_ERROR(createDescriptorSetLayout())
-    HANDLE_VK_ERROR(createGraphicsPipeline())
+
+
+    GraphicsPipelineParams mainPipelineParams;
+    mainPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_FILL;
+    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipeline))
+
+DEBUG_CODE(
+    GraphicsPipelineParams debugPipelineParams;
+    debugPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_LINE;
+    HANDLE_VK_ERROR(createGraphicsPipeline(debugPipelineParams, debugGraphicsPipeline))
+)
+
     HANDLE_VK_ERROR(createFramebuffers())
     HANDLE_VK_ERROR(createCommandPool())
     createUniformBuffers();
@@ -129,6 +140,11 @@ void LRenderer::cleanup()
 
     vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+
+
+DEBUG_CODE(
+    vkDestroyPipeline(logicalDevice, debugGraphicsPipeline, nullptr);
+)
 
     vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
     //vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
@@ -375,7 +391,7 @@ VkResult LRenderer::createDescriptorSetLayout()
     return vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &descriptorSetLayout);
 }
 
-VkResult LRenderer::createGraphicsPipeline()
+VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut)
 {
     VkShaderModule vertShaderModule = createShaderModule(genericVert);
     VkShaderModule fragShaderModule = createShaderModule(genericFrag);
@@ -419,7 +435,7 @@ VkResult LRenderer::createGraphicsPipeline()
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.polygonMode = params.polygonMode;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -481,7 +497,10 @@ VkResult LRenderer::createGraphicsPipeline()
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    HANDLE_VK_ERROR(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &pipelineLayout))
+    if (!pipelineLayout)
+    {
+        HANDLE_VK_ERROR(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &pipelineLayout))
+    }
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -500,8 +519,9 @@ VkResult LRenderer::createGraphicsPipeline()
     pipelineInfo.renderPass = renderPass;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = nullptr; // Optional
-    pipelineInfo.basePipelineIndex = 0;
-    HANDLE_VK_ERROR(vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline))
+    pipelineInfo.basePipelineIndex = -1;
+
+    HANDLE_VK_ERROR(vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipelineOut))
 
     vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
     vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
@@ -781,7 +801,6 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     renderPassInfo.pClearValues = &clearColor;
     
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -793,35 +812,45 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
     VkRect2D scissor{};
-    scissor.offset = {0, 0};
+    scissor.offset = { 0, 0 };
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    
+    auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LPrimitiveMesh>>& meshes)
+        {
+            for (auto it = meshes.begin(); it != meshes.end(); ++it)
+            {
+                if (!it->expired())
+                {
+                    LG::LPrimitiveMesh& mesh = *it->lock();
 
-    //vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-    
-    for (auto it = primitiveMeshes.begin(); it != primitiveMeshes.end(); ++it)
-    {
-        if (!it->expired())
-        {
-            LG::LPrimitiveMesh& mesh = *it->lock();
-            
-            updatePushConstants(mesh);
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
-            
-            const auto& memoryBuffer = ObjectBuilder::getMemoryBuffer(mesh.typeName);
-            VkBuffer vertexBuffers[] = {memoryBuffer.vertexBuffer};
-            VkDeviceSize offsets[] = {0};
-            
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-            vkCmdDrawIndexed(commandBuffer, mesh.indicesCount, 1, 0, 0, 0);
-        }
-        else
-        {
-            it = primitiveMeshes.erase(it);
-        }
-    }
-    
+                    updatePushConstants(mesh);
+                    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
+
+                    const auto& memoryBuffer = ObjectBuilder::getMemoryBuffer(mesh.typeName);
+                    VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
+                    VkDeviceSize offsets[] = { 0 };
+
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                    vkCmdDrawIndexed(commandBuffer, mesh.indicesCount, 1, 0, 0, 0);
+                }
+                else
+                {
+                    it = meshes.erase(it);
+                }
+            }
+        };
+
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    drawMeshes(primitiveMeshes);
+
+    DEBUG_CODE(
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, debugGraphicsPipeline);
+        drawMeshes(debugMeshes);
+              )
+  
     vkCmdEndRenderPass(commandBuffer);
     HANDLE_VK_ERROR(vkEndCommandBuffer(commandBuffer))
 }
@@ -1236,6 +1265,11 @@ void LRenderer::addTickablePrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr)
 {
     tickableMeshes.push_back(ptr);
 }
+
+DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr)
+{
+    debugMeshes.push_back(ptr);
+})
 
 void LRenderer::framebufferResizeCallback(GLFWwindow* window, int32 width, int32 height)
 {

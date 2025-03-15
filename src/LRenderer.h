@@ -12,6 +12,12 @@
 #include "LWindow.h"
 #include "Primitives.h"
 
+#ifndef NDEBUG
+#define DEBUG_CODE(x) x
+#else
+#define DEBUG_CODE(x)
+#endif
+    
 class LRenderer
 {
 	friend class ObjectBuilder;
@@ -29,6 +35,11 @@ public:
 	{
 		glm::mat4 mvpMatrix;
 	} pushConstants;
+
+	struct GraphicsPipelineParams
+	{
+		VkPolygonMode polygonMode;
+	};
 	
 	
 	LRenderer(const LWindow& window);
@@ -88,7 +99,7 @@ private:
 	VkResult createImageViews();
 	VkResult createRenderPass();
 	VkResult createDescriptorSetLayout();
-	VkResult createGraphicsPipeline();
+	VkResult createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut);
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
@@ -197,6 +208,7 @@ private:
 
 	void addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr);
 	void addTickablePrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr);
+	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr);)
 
 	// properties
 
@@ -231,12 +243,14 @@ private:
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 
 	VkPipeline graphicsPipeline;
+	VkPipeline debugGraphicsPipeline;
+
 	VkRenderPass renderPass;
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorPool descriptorPool;
 	std::vector<VkDescriptorSet> descriptorSets;
 	
-	VkPipelineLayout pipelineLayout;
+	VkPipelineLayout pipelineLayout = nullptr;
 
 	VkCommandPool commandPool;
 	std::vector<VkCommandBuffer> commandBuffers;
@@ -275,6 +289,7 @@ private:
 
 	bool bNeedToUpdateProjView = false;
 	
+	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> debugMeshes;
 	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> primitiveMeshes;
 	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> tickableMeshes;
 };
@@ -291,9 +306,28 @@ public:
 	template<typename T>
 	[[nodiscard]] static std::shared_ptr<T> construct()
 	{
-#ifndef NDEBUG
+		auto object = constructImpl<T>();
+		LRenderer::get()->addPrimitve(object);
+		return object;
+
+	}
+
+DEBUG_CODE(
+	template<typename T>
+	[[nodiscard]] static std::shared_ptr<T> constructDebug()
+	{
+		auto object = constructImpl<T>();
+		LRenderer::get()->addDebugPrimitive(object);
+		return object;
+	}
+)
+
+	template<typename T>
+	[[nodiscard]] static std::shared_ptr<T> constructImpl()
+	{
+DEBUG_CODE(
 		bIsConstructing = true;
-#endif
+)
 		
 		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
 		
@@ -311,16 +345,14 @@ public:
 				renderer->createObjectBuffer(object->getIndexBuffer(), resBuffer.first->second, LRenderer::BufferType::Index);
 			}
 
-			renderer->addPrimitve(object);
-
 			if constexpr (std::is_base_of<LTickable, T>::value)
 			{
 				renderer->addTickablePrimitive(object);
 			}
 	    }
-#ifndef NDEBUG
+DEBUG_CODE(
 		bIsConstructing = false;
-#endif
+)
         
 		return object;
 	}
@@ -341,16 +373,16 @@ public:
 		}
 	}
 
-#ifndef NDEBUG
+DEBUG_CODE(
 	static bool isConstructing() {return bIsConstructing;}
-#endif
+)
         
 protected:
         
 	static std::unordered_map<std::string, int32> objectsCounter;
 	static std::unordered_map<std::string, LRenderer::VkMemoryBuffer> memoryBuffers;
-#ifndef NDEBUG
+DEBUG_CODE(
 	static bool bIsConstructing;
-#endif
+)
 };   
 

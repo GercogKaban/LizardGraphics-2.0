@@ -50,12 +50,12 @@ const std::vector<uint16_t> LG::LCubeVertexBuffer::indicesCube =
 
 LG::LPrimitiveMesh::LPrimitiveMesh()
 {
-#ifndef NDEBUG
+DEBUG_CODE(
     if (!ObjectBuilder::isConstructing())
     {
         RAISE_VK_ERROR("Use ObjectBuilder::construct to create the objects")
     }
-#endif
+)
 }
 
 LG::LPrimitiveMesh::~LPrimitiveMesh()
