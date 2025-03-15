@@ -394,8 +394,8 @@ VkResult LRenderer::createGraphicsPipeline()
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
-    auto bindingDescription = Primitives::LPrimitiveVertexBuffer::getBindingDescription();
-    auto attributeDescriptions = Primitives::LPrimitiveVertexBuffer::getAttributeDescriptions();
+    auto bindingDescription = LG::LPrimitiveVertexBuffer::getBindingDescription();
+    auto attributeDescriptions = LG::LPrimitiveVertexBuffer::getAttributeDescriptions();
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -803,7 +803,7 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     {
         if (!it->expired())
         {
-            Primitives::LPrimitiveMesh& mesh = *it->lock();
+            LG::LPrimitiveMesh& mesh = *it->lock();
             
             updatePushConstants(mesh);
             vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
@@ -929,7 +929,7 @@ void LRenderer::drawFrame()
     currentFrame = (currentFrame + 1) % maxFramesInFlight;
 }
 
-void LRenderer::updatePushConstants(const Primitives::LPrimitiveMesh& mesh)
+void LRenderer::updatePushConstants(const LG::LPrimitiveMesh& mesh)
 {
     glm::mat4 model = mesh.getModelMatrix();
     pushConstants.mvpMatrix = projView * model;
@@ -1227,12 +1227,12 @@ uint32 LRenderer::getPushConstantSize(VkPhysicalDevice physicalDeviceIn) const
     return deviceProperties.limits.maxPushConstantsSize;
 }
 
-void LRenderer::addPrimitve(std::weak_ptr<Primitives::LPrimitiveMesh> ptr)
+void LRenderer::addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr)
 {
     primitiveMeshes.push_back(ptr);
 }
 
-void LRenderer::addTickablePrimitive(std::weak_ptr<Primitives::LPrimitiveMesh> ptr)
+void LRenderer::addTickablePrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr)
 {
     tickableMeshes.push_back(ptr);
 }

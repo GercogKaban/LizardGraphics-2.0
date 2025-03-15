@@ -8,7 +8,7 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/glm.hpp"
 
-namespace Primitives
+namespace LG
 {
     class LPrimitiveVertexBuffer
     {
@@ -16,7 +16,7 @@ namespace Primitives
         
         struct Vertex
         {
-            glm::vec2 pos;
+            glm::vec3 pos;
             glm::vec3 color;
         };
         
@@ -36,7 +36,7 @@ namespace Primitives
 			
             attributeDescriptions[0].binding = 0;
             attributeDescriptions[0].location = 0;
-            attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
             attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
             attributeDescriptions[1].binding = 0;
@@ -71,6 +71,26 @@ namespace Primitives
 
         static const std::vector<Vertex> verticesPlane;
         static const std::vector<uint16> indicesPlane;
+    };
+
+    class LCubeVertexBuffer : public LPrimitiveVertexBuffer
+    {
+
+    public:
+        virtual const std::vector<Vertex>& getVertexBuffer() override
+        {
+            return verticesCube;
+        }
+
+        virtual const std::vector<uint16>& getIndexBuffer() override
+        {
+            return indicesCube;
+        }
+
+    protected:
+
+        static const std::vector<Vertex> verticesCube;
+        static const std::vector<uint16> indicesCube;
     };
     
     class LPrimitiveMesh
@@ -121,6 +141,10 @@ namespace Primitives
     };
     
     class LPlane : public LPrimitiveMesh, public LPlaneVertexBuffer
+    {
+    };
+
+    class LCube : public LPrimitiveMesh, public LCubeVertexBuffer
     {
     };
 }

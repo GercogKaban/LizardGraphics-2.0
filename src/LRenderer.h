@@ -162,7 +162,7 @@ private:
 	void drawFrame();
 
 	// TODO: needs to be optimized and also this temp rotation should be disabled
-	void updatePushConstants(const Primitives::LPrimitiveMesh& mesh);
+	void updatePushConstants(const LG::LPrimitiveMesh& mesh);
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -195,8 +195,8 @@ private:
 
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 
-	void addPrimitve(std::weak_ptr<Primitives::LPrimitiveMesh> ptr);
-	void addTickablePrimitive(std::weak_ptr<Primitives::LPrimitiveMesh> ptr);
+	void addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr);
+	void addTickablePrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr);
 
 	// properties
 
@@ -275,8 +275,8 @@ private:
 
 	bool bNeedToUpdateProjView = false;
 	
-	std::vector<std::weak_ptr<Primitives::LPrimitiveMesh>> primitiveMeshes;
-	std::vector<std::weak_ptr<Primitives::LPrimitiveMesh>> tickableMeshes;
+	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> primitiveMeshes;
+	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> tickableMeshes;
 };
 
 class ObjectBuilder
