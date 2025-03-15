@@ -16,7 +16,13 @@ endif()
 find_package(Vulkan REQUIRED)
 
 add_library(LizardGraphics STATIC ${SOURCE_FILES} ${HEADER_FILES})
-include_directories(${PROJECT_SOURCE_DIR} ${Vulkan_INCLUDE_DIR} glfw glfw/include/GLFW magic_enum/include/magic_enum)
+target_include_directories(LizardGraphics PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/glfw/include/GLFW>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/magic_enum/include>
+    $<INSTALL_INTERFACE:src>
+    ${Vulkan_INCLUDE_DIR}
+)
 
 #glfw /////////////////////////////////////////////
 

@@ -16,7 +16,7 @@
 #include "LWindow.h"
 #include "vulkan/vulkan.h"
 
-#include "src/gen_shaders.cxx"
+#include "gen_shaders.cxx"
 
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;

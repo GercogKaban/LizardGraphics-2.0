@@ -16,5 +16,5 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "magic_enum/include/magic_enum/magic_enum.hpp"
+#include "magic_enum/magic_enum.hpp"
 #include "LLogger.h"
