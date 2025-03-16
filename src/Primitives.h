@@ -16,30 +16,33 @@ namespace LG
 
     };
 
-    class LPrimitiveVertexBuffer
+    class LGraphicsComponent
     {
+        LGraphicsComponent(const LGraphicsComponent&) = delete;
+        LGraphicsComponent& operator=(const LGraphicsComponent&) = delete;
+
     public:
-        
+
         struct Vertex
         {
             glm::vec3 pos;
             glm::vec3 color;
         };
-        
+
         static VkVertexInputBindingDescription getBindingDescription()
         {
             VkVertexInputBindingDescription bindingDescription{};
             bindingDescription.binding = 0;
             bindingDescription.stride = sizeof(Vertex);
             bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-			
+
             return bindingDescription;
         }
-		
+
         static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
         {
             std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
-			
+
             attributeDescriptions[0].binding = 0;
             attributeDescriptions[0].location = 0;
             attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -53,117 +56,74 @@ namespace LG
             return attributeDescriptions;
         }
 
-        virtual const std::vector<Vertex>& getVertexBuffer() 
-        { 
+        virtual const std::vector<Vertex>& getVertexBuffer() const
+        {
             static std::vector<Vertex> dummy;
-            return dummy; 
+            return dummy;
         };
-        virtual const std::vector<uint16>& getIndexBuffer() 
-        { 
+
+        virtual const std::vector<uint16>& getIndexBuffer() const
+        {
             static std::vector<uint16> dummy;
-            return dummy; 
+            return dummy;
         };
-        
-        virtual ~LPrimitiveVertexBuffer() = default;
-    };
-    
-    class LPlaneVertexBuffer : public LPrimitiveVertexBuffer
-    {
-        
-    public:
-        virtual const std::vector<Vertex>& getVertexBuffer() override
+
+        const std::string& getTypeName()
         {
-            return verticesPlane;
+            return typeName;
         }
-
-        virtual const std::vector<uint16>& getIndexBuffer() override
-        {
-            return indicesPlane;
-        }
-        
-    protected:
-
-        static const std::vector<Vertex> verticesPlane;
-        static const std::vector<uint16> indicesPlane;
-    };
-
-    class LCubeVertexBuffer : public LPrimitiveVertexBuffer
-    {
-
-    public:
-        virtual const std::vector<Vertex>& getVertexBuffer() override
-        {
-            return verticesCube;
-        }
-
-        virtual const std::vector<uint16>& getIndexBuffer() override
-        {
-            return indicesCube;
-        }
-
-    protected:
-
-        static const std::vector<Vertex> verticesCube;
-        static const std::vector<uint16> indicesCube;
-    };
-    
-    class LGraphicsComponent
-    {
-        LGraphicsComponent(const LGraphicsComponent&) = delete;
-        LGraphicsComponent& operator=(const LGraphicsComponent&) = delete;
-
-    public:
         
         LGraphicsComponent();
         virtual ~LGraphicsComponent();
 
-        //bool isModified() const {return bModified;}
-
         std::function<glm::mat4x4 ()> getModelMatrix = [](){ return glm::mat4x4(1); };;
-        // virtual const glm::mat4x4 getModelMatrix() const = 0;
-        //void setModelMatrix(const glm::mat4& modelMatrix)
-        //{
-        //    this->modelMatrix = modelMatrix;
-        //    bModified = true;
-        //}
-        //
-        //void translate(const glm::vec3& translation)
-        //{
-        //    modelMatrix = glm::translate(modelMatrix, translation);
-        //    bModified = true;
-        //}
-
-        //void rotate(float angle, const glm::vec3& axis)
-        //{
-        //    modelMatrix = glm::rotate(modelMatrix, angle, axis);
-        //    bModified = true;
-        //}
-
-        //void scale(const glm::vec3& scale)
-        //{
-        //    modelMatrix = glm::scale(modelMatrix, scale);
-        //    bModified = true;
-        //}
-
-        // some stupid hack, they are const only for user, so their values will be initialized soon
-        const std::string typeName = "";
-        const uint32 indicesCount = 0;
         
-    protected:
-        
-        //glm::mat4 modelMatrix = glm::mat4(1.0f);
-        //mutable bool bModified = true;
+        std::string typeName;
+        uint32 indicesCount = 0;
     };
 
-    class LGFullGraphicsComponent : virtual public LGraphicsComponent, virtual public LPrimitiveVertexBuffer
+    extern const std::vector<LG::LGraphicsComponent::Vertex> verticesCube;
+    extern const std::vector<uint16> indicesCube;
+
+    class LCube : public LGraphicsComponent
     {
+
+    public:
+
+        LCube()
+        {
+            typeName = std::string("LCube");
+        }
+
+        virtual const std::vector<Vertex>& getVertexBuffer() const override
+        {
+            return verticesCube;
+        }
+
+        virtual const std::vector<uint16>& getIndexBuffer() const override
+        {
+            return indicesCube;
+        }
     };
 
-    class LPlane : public LPlaneVertexBuffer, public LGFullGraphicsComponent
-    {
-    };
+    extern const std::vector<LG::LGraphicsComponent::Vertex> verticesPlane;
+    extern const std::vector<uint16> indicesPlane;
 
-    class LCube : public LCubeVertexBuffer, public LGFullGraphicsComponent
+    class LPlane : public LGraphicsComponent
     {
+        LPlane()
+        {
+            typeName = std::string("LPlane");
+        }
+
+        virtual const std::vector<Vertex>& getVertexBuffer() const override
+        {
+            return verticesPlane;
+        }
+
+        virtual const std::vector<uint16>& getIndexBuffer() const override
+        {
+            return indicesPlane;
+        }
     };
 }

@@ -368,8 +368,8 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
-    auto bindingDescription = LG::LPrimitiveVertexBuffer::getBindingDescription();
-    auto attributeDescriptions = LG::LPrimitiveVertexBuffer::getAttributeDescriptions();
+    auto bindingDescription = LG::LGraphicsComponent::getBindingDescription();
+    auto attributeDescriptions = LG::LGraphicsComponent::getAttributeDescriptions();
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -812,7 +812,7 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
                     updatePushConstants(mesh);
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.typeName);
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getTypeName());
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 

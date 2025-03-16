@@ -314,7 +314,7 @@ protected:
 	}
 )
 
-	static void adjustImpl(std::weak_ptr<LG::LGFullGraphicsComponent> t)
+	static void adjustImpl(std::weak_ptr<LG::LGraphicsComponent> t)
 	{
 		DEBUG_CODE(
 			bIsConstructing = true;
@@ -323,12 +323,12 @@ protected:
 		auto object = t.lock();
 
 		// TODO: it worth to implement UE FName alternative to save some memory
-		const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());
+		//const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());
 		const_cast<uint32&>(object->indicesCount) = object->getIndexBuffer().size();
 		if (LRenderer* renderer = LRenderer::get())
 		{
-			auto resCounter = objectsCounter.emplace(object->typeName, 0);
-			auto resBuffer = memoryBuffers.emplace(object->typeName, LRenderer::VkMemoryBuffer());
+			auto resCounter = objectsCounter.emplace(object->getTypeName(), 0);
+			auto resBuffer = memoryBuffers.emplace(object->getTypeName(), LRenderer::VkMemoryBuffer());
 
 			if (resCounter.first->second++ == 0)
 			{
@@ -344,8 +344,8 @@ protected:
 	template<typename T>
 	static void destruct(T* object)
 	{
-		auto resCounter = objectsCounter.find(object->typeName);
-		auto resBuffer = memoryBuffers.find(object->typeName);
+		auto resCounter = objectsCounter.find(object->getTypeName());
+		auto resBuffer = memoryBuffers.find(object->getTypeName());
 
 		if (int32 counter = --resCounter->second; counter == 0)
 		{

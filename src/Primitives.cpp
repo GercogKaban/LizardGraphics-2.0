@@ -2,7 +2,7 @@
 #include "Primitives.h"
 #include "LRenderer.h"
 
-const std::vector<LG::LPrimitiveVertexBuffer::Vertex> LG::LPlaneVertexBuffer::verticesPlane =
+const std::vector<LG::LGraphicsComponent::Vertex> LG::verticesPlane =
 {
     {{-0.5f, -0.5f, 0.0f},{1.0f, 0.0f, 0.0f}},
     {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
@@ -10,13 +10,13 @@ const std::vector<LG::LPrimitiveVertexBuffer::Vertex> LG::LPlaneVertexBuffer::ve
     {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
 };
 
-const std::vector<uint16> LG::LPlaneVertexBuffer::indicesPlane =
+const std::vector<uint16> LG::indicesPlane =
 {
     0, 1, 2, 2, 3, 0
 };
 
 // Define the 8 unique vertices of the cube
-const std::vector<LG::LPrimitiveVertexBuffer::Vertex> LG::LCubeVertexBuffer::verticesCube =
+const std::vector<LG::LGraphicsComponent::Vertex> LG::verticesCube =
 {
     // Front face
     {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}}, // 0
@@ -32,7 +32,7 @@ const std::vector<LG::LPrimitiveVertexBuffer::Vertex> LG::LCubeVertexBuffer::ver
 };
 
 // Define indices to form triangles
-const std::vector<uint16_t> LG::LCubeVertexBuffer::indicesCube =
+const std::vector<uint16_t> LG::indicesCube =
 {
     // Front face
     0, 1, 2, 2, 3, 0,
