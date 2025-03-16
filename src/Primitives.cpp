@@ -48,17 +48,17 @@ const std::vector<uint16_t> LG::LCubeVertexBuffer::indicesCube =
     4, 5, 1, 1, 0, 4
 };
 
-LG::LPrimitiveMesh::LPrimitiveMesh()
+LG::LGraphicsComponent::LGraphicsComponent()
 {
 DEBUG_CODE(
-    if (!RenderObjectBuilder::isConstructing())
+    if (!RenderComponentBuilder::isConstructing())
     {
         RAISE_VK_ERROR("Use ObjectBuilder::construct to create the objects")
     }
 )
 }
 
-LG::LPrimitiveMesh::~LPrimitiveMesh()
+LG::LGraphicsComponent::~LGraphicsComponent()
 {
-    ::RenderObjectBuilder::destruct(this);
+    ::RenderComponentBuilder::destruct(this);
 }

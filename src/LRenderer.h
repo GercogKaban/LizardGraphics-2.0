@@ -19,7 +19,7 @@
     
 class LRenderer
 {
-	friend class RenderObjectBuilder;
+	friend class RenderComponentBuilder;
 	
 public:
 	
@@ -167,7 +167,7 @@ protected:
 	void drawFrame();
 
 	// TODO: needs to be optimized and also this temp rotation should be disabled
-	void updatePushConstants(const LG::LPrimitiveMesh& mesh);
+	void updatePushConstants(const LG::LGraphicsComponent& mesh);
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -200,8 +200,8 @@ protected:
 
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 
-	void addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr);
-	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr);)
+	void addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr);
+	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
 
 	// properties
 
@@ -280,15 +280,15 @@ protected:
 
 	bool bNeedToUpdateProjView = false;
 	
-	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> debugMeshes;
-	std::vector<std::weak_ptr<LG::LPrimitiveMesh>> primitiveMeshes;
+	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
+	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
 };
 
-class RenderObjectBuilder
+class RenderComponentBuilder
 {
 protected:
 
-	friend class LG::LPrimitiveMesh;
+	friend class LG::LGraphicsComponent;
 	friend class LRenderer;
 	friend class LEngine;
 	friend class ObjectBuilder;

@@ -98,42 +98,42 @@ namespace LG
         static const std::vector<uint16> indicesCube;
     };
     
-    class LPrimitiveMesh
+    class LGraphicsComponent
     {
-        LPrimitiveMesh(const LPrimitiveMesh&) = delete;
-        LPrimitiveMesh& operator=(const LPrimitiveMesh&) = delete;
+        LGraphicsComponent(const LGraphicsComponent&) = delete;
+        LGraphicsComponent& operator=(const LGraphicsComponent&) = delete;
 
     public:
         
-        LPrimitiveMesh();
-        virtual ~LPrimitiveMesh();
+        LGraphicsComponent();
+        virtual ~LGraphicsComponent();
 
-        bool isModified() const {return bModified;}
+        //bool isModified() const {return bModified;}
 
-        const glm::mat4& getModelMatrix() const {return modelMatrix;}
-        void setModelMatrix(const glm::mat4& modelMatrix)
-        {
-            this->modelMatrix = modelMatrix;
-            bModified = true;
-        }
-        
-        void translate(const glm::vec3& translation)
-        {
-            modelMatrix = glm::translate(modelMatrix, translation);
-            bModified = true;
-        }
+        virtual glm::mat4 getModelMatrix() const { return glm::mat4(1.0f); }
+        //void setModelMatrix(const glm::mat4& modelMatrix)
+        //{
+        //    this->modelMatrix = modelMatrix;
+        //    bModified = true;
+        //}
+        //
+        //void translate(const glm::vec3& translation)
+        //{
+        //    modelMatrix = glm::translate(modelMatrix, translation);
+        //    bModified = true;
+        //}
 
-        void rotate(float angle, const glm::vec3& axis)
-        {
-            modelMatrix = glm::rotate(modelMatrix, angle, axis);
-            bModified = true;
-        }
+        //void rotate(float angle, const glm::vec3& axis)
+        //{
+        //    modelMatrix = glm::rotate(modelMatrix, angle, axis);
+        //    bModified = true;
+        //}
 
-        void scale(const glm::vec3& scale)
-        {
-            modelMatrix = glm::scale(modelMatrix, scale);
-            bModified = true;
-        }
+        //void scale(const glm::vec3& scale)
+        //{
+        //    modelMatrix = glm::scale(modelMatrix, scale);
+        //    bModified = true;
+        //}
 
         // some stupid hack, they are const only for user, so their values will be initialized soon
         const std::string typeName = "";
@@ -141,15 +141,15 @@ namespace LG
         
     protected:
         
-        glm::mat4 modelMatrix = glm::mat4(1.0f);
-        mutable bool bModified = true;
+        //glm::mat4 modelMatrix = glm::mat4(1.0f);
+        //mutable bool bModified = true;
     };
     
-    class LPlane : public LPrimitiveMesh, public LPlaneVertexBuffer
+    class LPlane : public LGraphicsComponent, public LPlaneVertexBuffer
     {
     };
 
-    class LCube : public LPrimitiveMesh, public LCubeVertexBuffer
+    class LCube : public LGraphicsComponent, public LCubeVertexBuffer
     {
     };
 }

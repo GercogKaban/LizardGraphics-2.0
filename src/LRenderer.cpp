@@ -19,13 +19,13 @@
 #include "gen_shaders.cxx"
 
 DEBUG_CODE(
-    bool RenderObjectBuilder::bIsConstructing = false;
+    bool RenderComponentBuilder::bIsConstructing = false;
 )
 
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
-std::unordered_map<std::string, int32> RenderObjectBuilder::objectsCounter;
-std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderObjectBuilder::memoryBuffers;
+std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
+std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
 LRenderer::LRenderer(const LWindow& window)
 {
@@ -801,18 +801,18 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     
-    auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LPrimitiveMesh>>& meshes)
+    auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
         {
             for (auto it = meshes.begin(); it != meshes.end(); ++it)
             {
                 if (!it->expired())
                 {
-                    LG::LPrimitiveMesh& mesh = *it->lock();
+                    LG::LGraphicsComponent& mesh = *it->lock();
 
                     updatePushConstants(mesh);
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                    const auto& memoryBuffer = RenderObjectBuilder::getMemoryBuffer(mesh.typeName);
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.typeName);
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 
@@ -943,7 +943,7 @@ void LRenderer::drawFrame()
     currentFrame = (currentFrame + 1) % maxFramesInFlight;
 }
 
-void LRenderer::updatePushConstants(const LG::LPrimitiveMesh& mesh)
+void LRenderer::updatePushConstants(const LG::LGraphicsComponent& mesh)
 {
     glm::mat4 model = mesh.getModelMatrix();
     pushConstants.mvpMatrix = projView * model;
@@ -1241,12 +1241,12 @@ uint32 LRenderer::getPushConstantSize(VkPhysicalDevice physicalDeviceIn) const
     return deviceProperties.limits.maxPushConstantsSize;
 }
 
-void LRenderer::addPrimitve(std::weak_ptr<LG::LPrimitiveMesh> ptr)
+void LRenderer::addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
     primitiveMeshes.push_back(ptr);
 }
 
-DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LPrimitiveMesh> ptr)
+DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
     debugMeshes.push_back(ptr);
 })
