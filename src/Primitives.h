@@ -110,7 +110,7 @@ namespace LG
 
         //bool isModified() const {return bModified;}
 
-        virtual glm::mat4 getModelMatrix() const { return glm::mat4(1.0f); }
+        virtual const glm::mat4x4 getModelMatrix() const = 0;
         //void setModelMatrix(const glm::mat4& modelMatrix)
         //{
         //    this->modelMatrix = modelMatrix;

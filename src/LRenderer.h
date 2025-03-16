@@ -293,33 +293,35 @@ protected:
 	friend class LEngine;
 	friend class ObjectBuilder;
 
-	template<typename T>
-	[[nodiscard]] static std::shared_ptr<T> construct()
-	{
-		auto object = constructImpl<T>();
-		LRenderer::get()->addPrimitve(object);
-		return object;
+	// template<typename T>
+	// [[nodiscard]] static std::shared_ptr<T> construct()
+	// {
+	// 	auto object = constructImpl<T>();
+	// 	LRenderer::get()->addPrimitve(object);
+	// 	return object;
 
-	}
+	// }
 
 	DEBUG_CODE(
 	template<typename T>
 	[[nodiscard]] static std::shared_ptr<T> constructDebug()
 	{
-		auto object = constructImpl<T>();
+		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
+
+		adjustImpl<T>(object);
 		LRenderer::get()->addDebugPrimitive(object);
 		return object;
 	}
 )
 
 	template<typename T>
-	[[nodiscard]] static std::shared_ptr<T> constructImpl()
+	static void adjustImpl(std::weak_ptr<T> t)
 	{
 		DEBUG_CODE(
 			bIsConstructing = true;
 			)
 
-		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
+		auto object = t.lock();
 
 		// TODO: it worth to implement UE FName alternative to save some memory
 		const_cast<std::string&>(object->typeName) = std::string(typeid(T).name());
@@ -338,8 +340,6 @@ protected:
 		DEBUG_CODE(
 			bIsConstructing = false;
 		)
-
-			return object;
 	}
 
 	template<typename T>
