@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <array>
+#include <functional>
 
 #include "globals.h"
 #include "vulkan/vulkan.h"
@@ -52,8 +53,16 @@ namespace LG
             return attributeDescriptions;
         }
 
-        virtual const std::vector<Vertex>& getVertexBuffer() = 0;
-        virtual const std::vector<uint16>& getIndexBuffer() = 0;
+        virtual const std::vector<Vertex>& getVertexBuffer() 
+        { 
+            static std::vector<Vertex> dummy;
+            return dummy; 
+        };
+        virtual const std::vector<uint16>& getIndexBuffer() 
+        { 
+            static std::vector<uint16> dummy;
+            return dummy; 
+        };
         
         virtual ~LPrimitiveVertexBuffer() = default;
     };
@@ -110,7 +119,8 @@ namespace LG
 
         //bool isModified() const {return bModified;}
 
-        virtual const glm::mat4x4 getModelMatrix() const = 0;
+        std::function<glm::mat4x4 ()> getModelMatrix = [](){ return glm::mat4x4(1); };;
+        // virtual const glm::mat4x4 getModelMatrix() const = 0;
         //void setModelMatrix(const glm::mat4& modelMatrix)
         //{
         //    this->modelMatrix = modelMatrix;
@@ -144,12 +154,16 @@ namespace LG
         //glm::mat4 modelMatrix = glm::mat4(1.0f);
         //mutable bool bModified = true;
     };
-    
-    class LPlane : public LGraphicsComponent, public LPlaneVertexBuffer
+
+    class LGFullGraphicsComponent : virtual public LGraphicsComponent, virtual public LPrimitiveVertexBuffer
     {
     };
 
-    class LCube : public LGraphicsComponent, public LCubeVertexBuffer
+    class LPlane : public LPlaneVertexBuffer, public LGFullGraphicsComponent
+    {
+    };
+
+    class LCube : public LCubeVertexBuffer, public LGFullGraphicsComponent
     {
     };
 }

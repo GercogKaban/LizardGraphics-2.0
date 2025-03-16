@@ -64,7 +64,7 @@ public:
 		return thisPtr;
 	}
 
-protected:
+// protected:
 
 	static LRenderer* thisPtr;
 
@@ -314,8 +314,7 @@ protected:
 	}
 )
 
-	template<typename T>
-	static void adjustImpl(std::weak_ptr<T> t)
+	static void adjustImpl(std::weak_ptr<LG::LGFullGraphicsComponent> t)
 	{
 		DEBUG_CODE(
 			bIsConstructing = true;
@@ -324,7 +323,7 @@ protected:
 		auto object = t.lock();
 
 		// TODO: it worth to implement UE FName alternative to save some memory
-		const_cast<std::string&>(object->typeName) = std::string(typeid(T).name());
+		const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());
 		const_cast<uint32&>(object->indicesCount) = object->getIndexBuffer().size();
 		if (LRenderer* renderer = LRenderer::get())
 		{

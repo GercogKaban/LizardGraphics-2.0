@@ -50,12 +50,12 @@ const std::vector<uint16_t> LG::LCubeVertexBuffer::indicesCube =
 
 LG::LGraphicsComponent::LGraphicsComponent()
 {
-DEBUG_CODE(
-    if (!RenderComponentBuilder::isConstructing())
-    {
-        RAISE_VK_ERROR("Use ObjectBuilder::construct to create the objects")
-    }
-)
+// DEBUG_CODE(
+//     if (!RenderComponentBuilder::isConstructing())
+//     {
+//         RAISE_VK_ERROR("Use ObjectBuilder::construct to create the objects")
+//     }
+// )
 }
 
 LG::LGraphicsComponent::~LGraphicsComponent()
