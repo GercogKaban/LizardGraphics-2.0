@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <unordered_map>
+#include <string.h>
 
 #include "LWindow.h"
 #include "Primitives.h"
