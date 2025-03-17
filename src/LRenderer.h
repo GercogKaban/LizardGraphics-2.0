@@ -3,7 +3,6 @@
 #include "vulkan/vulkan.h"
 #include <vector>
 #include <optional>
-#include <memory>
 #include <chrono>
 #include <filesystem>
 #include <unordered_map>
@@ -201,8 +200,8 @@ public:
 
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 
-	void addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr);
-	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
+	void addPrimitve(LG::LGraphicsComponent* ptr);
+	DEBUG_CODE(void addDebugPrimitive(LG::LGraphicsComponent* ptr);)
 
 	// properties
 
@@ -281,8 +280,8 @@ public:
 
 	bool bNeedToUpdateProjView = false;
 	
-	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
-	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
+	std::vector<LG::LGraphicsComponent*> debugMeshes;
+	std::vector<LG::LGraphicsComponent*> primitiveMeshes;
 };
 
 class RenderComponentBuilder
@@ -305,9 +304,9 @@ protected:
 
 	DEBUG_CODE(
 	template<typename T>
-	[[nodiscard]] static std::shared_ptr<T> constructDebug()
+	[[nodiscard]] static T* constructDebug()
 	{
-		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
+		T* object = new T();
 
 		adjustImpl<T>(object);
 		LRenderer::get()->addDebugPrimitive(object);
@@ -315,13 +314,13 @@ protected:
 	}
 )
 
-	static void adjustImpl(std::weak_ptr<LG::LGraphicsComponent> t)
+	static void adjustImpl(LG::LGraphicsComponent* t)
 	{
 		DEBUG_CODE(
 			bIsConstructing = true;
 			)
 
-		auto object = t.lock();
+		auto object = t;
 
 		// TODO: it worth to implement UE FName alternative to save some memory
 		//const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());
