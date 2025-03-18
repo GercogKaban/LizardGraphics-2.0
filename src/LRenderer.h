@@ -3,6 +3,7 @@
 #include "vulkan/vulkan.h"
 #include <vector>
 #include <optional>
+#include <memory>
 #include <chrono>
 #include <filesystem>
 #include <unordered_map>
@@ -200,8 +201,8 @@ public:
 
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 
-	void addPrimitve(LG::LGraphicsComponent* ptr);
-	DEBUG_CODE(void addDebugPrimitive(LG::LGraphicsComponent* ptr);)
+	void addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr);
+	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
 
 	// properties
 
@@ -280,8 +281,8 @@ public:
 
 	bool bNeedToUpdateProjView = false;
 	
-	std::vector<LG::LGraphicsComponent*> debugMeshes;
-	std::vector<LG::LGraphicsComponent*> primitiveMeshes;
+	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
+	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
 };
 
 class RenderComponentBuilder
@@ -314,13 +315,13 @@ protected:
 //	}
 //)
 
-	static void adjustImpl(LG::LGraphicsComponent* t)
+	static void adjustImpl(std::weak_ptr<LG::LGraphicsComponent> t)
 	{
 		DEBUG_CODE(
 			bIsConstructing = true;
 			)
 
-		auto object = t;
+		auto object = t.lock();
 
 		// TODO: it worth to implement UE FName alternative to save some memory
 		//const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());

@@ -801,15 +801,13 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     
-    auto drawMeshes = [this, commandBuffer](std::vector<LG::LGraphicsComponent*>& meshes)
+    auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
         {
-            // for (auto it = meshes.begin(); it != meshes.end(); ++it)
-            // {
-            //     if (!*it)
-                // {
-                for(LG::LGraphicsComponent* it: meshes)
+            for (auto it = meshes.begin(); it != meshes.end(); ++it)
+            {
+                if (!it->expired())
                 {
-                    LG::LGraphicsComponent& mesh = *it;
+                    LG::LGraphicsComponent& mesh = *it->lock();
 
                     updatePushConstants(mesh);
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
@@ -822,11 +820,11 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
                     vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
                     vkCmdDrawIndexed(commandBuffer, mesh.indicesCount, 1, 0, 0, 0);
                 }
-                // else
-                // {
-                //     it = meshes.erase(it);
-                // }
-            // }
+                else
+                {
+                    it = meshes.erase(it);
+                }
+            }
         };
 
 
@@ -1243,12 +1241,12 @@ uint32 LRenderer::getPushConstantSize(VkPhysicalDevice physicalDeviceIn) const
     return deviceProperties.limits.maxPushConstantsSize;
 }
 
-void LRenderer::addPrimitve(LG::LGraphicsComponent* ptr)
+void LRenderer::addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
     primitiveMeshes.push_back(ptr);
 }
 
-DEBUG_CODE(void LRenderer::addDebugPrimitive(LG::LGraphicsComponent* ptr)
+DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
     debugMeshes.push_back(ptr);
 })
