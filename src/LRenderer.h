@@ -302,17 +302,17 @@ protected:
 
 	// }
 
-	DEBUG_CODE(
-	template<typename T>
-	[[nodiscard]] static T* constructDebug()
-	{
-		T* object = new T();
-
-		adjustImpl<T>(object);
-		LRenderer::get()->addDebugPrimitive(object);
-		return object;
-	}
-)
+//	DEBUG_CODE(
+//	template<typename T>
+//	[[nodiscard]] static std::shared_ptr<T> constructDebug()
+//	{
+//		std::shared_ptr<T> object = std::shared_ptr<T>(new T());
+//
+//		adjustImpl<T>(object);
+//		LRenderer::get()->addDebugPrimitive(object);
+//		return object;
+//	}
+//)
 
 	static void adjustImpl(LG::LGraphicsComponent* t)
 	{
