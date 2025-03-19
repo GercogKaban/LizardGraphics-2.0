@@ -7,10 +7,12 @@
 #include <chrono>
 #include <filesystem>
 #include <unordered_map>
-#include <string.h>
+#include <string>
 
 #include "LWindow.h"
 #include "Primitives.h"
+
+#include <vma/vk_mem_alloc.h>
 
 #ifndef NDEBUG
 #define DEBUG_CODE(x) x
@@ -27,8 +29,7 @@ public:
 	struct VkMemoryBuffer
 	{
 		VkBuffer vertexBuffer, indexBuffer;
-		VkDeviceMemory vertexBufferMemory, indexBufferMemory;
-		uint64 memorySize;
+		VmaAllocation vertexBufferMemory, indexBufferMemory;
 	};
 
 	struct PushConstants
@@ -90,6 +91,7 @@ public:
 	VkResult createInstance();
 	VkResult pickPhysicalDevice();
     VkResult createLogicalDevice();
+	VkResult createAllocator();
 	VkResult createSurface();
 	VkResult createImageViews();
 	VkResult createRenderPass();
@@ -110,48 +112,49 @@ public:
     	Index
     };
 	
-	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties, VkBuffer& buffer, VmaAllocation& bufferMemory, uint32 vmaFlags = 0);
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void createUniformBuffers();
+
+	void vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData);
+	void vmaUnmapWrap(VmaAllocator allocator, VmaAllocation* memory);
+	void vmaDestroyBufferWrap(VmaAllocator allocator, VkBuffer& buffer, VmaAllocation* memory);
 	
 	template<typename Buffer>
 	void createObjectBuffer(const Buffer& arrData, VkMemoryBuffer& memoryBuffer, BufferType bufferType)
 	{
 		using T = typename Buffer::value_type;
-		memoryBuffer.memorySize = sizeof(T) * arrData.size();
+		
+		auto memorySize = sizeof(T) * arrData.size();
 
 		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+		VmaAllocation stagingBufferMemory;
+		createBuffer(memorySize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO, stagingBuffer, stagingBufferMemory, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
 
-		void* tmp;
-		vkMapMemory(logicalDevice, stagingBufferMemory, 0, memoryBuffer.memorySize, 0, &tmp);
-		memcpy(tmp, arrData.data(), memoryBuffer.memorySize);
-		vkUnmapMemory(logicalDevice, stagingBufferMemory);
+		void* mappedData = nullptr;
+		vmaMapWrap(allocator, &stagingBufferMemory, mappedData);
+		memcpy(mappedData, arrData.data(), memorySize);
+		vmaUnmapWrap(allocator, &stagingBufferMemory);
 
 		if (bufferType == BufferType::Vertex)
 		{
-			createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryBuffer.vertexBuffer, memoryBuffer.vertexBufferMemory);
-			copyBuffer(stagingBuffer, memoryBuffer.vertexBuffer, memoryBuffer.memorySize);	
+			createBuffer(memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, memoryBuffer.vertexBuffer, memoryBuffer.vertexBufferMemory);
+			copyBuffer(stagingBuffer, memoryBuffer.vertexBuffer, memorySize);	
 		}
 
 		else
 		{
-			createBuffer(memoryBuffer.memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryBuffer.indexBuffer, memoryBuffer.indexBufferMemory);
-			copyBuffer(stagingBuffer, memoryBuffer.indexBuffer, memoryBuffer.memorySize);	
+			createBuffer(memorySize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, memoryBuffer.indexBuffer, memoryBuffer.indexBufferMemory);
+			copyBuffer(stagingBuffer, memoryBuffer.indexBuffer, memorySize);	
 		}
 
-		vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
-		vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
+		vmaDestroyBufferWrap(allocator, stagingBuffer, &stagingBufferMemory);
 	}
 
 	void destroyObjectBuffer(VkMemoryBuffer& memoryBuffer)
 	{
-		vkDestroyBuffer(logicalDevice, memoryBuffer.indexBuffer, nullptr);
-		vkFreeMemory(logicalDevice, memoryBuffer.indexBufferMemory, nullptr);
-		
-		vkDestroyBuffer(logicalDevice, memoryBuffer.vertexBuffer, nullptr);
-		vkFreeMemory(logicalDevice, memoryBuffer.vertexBufferMemory, nullptr);
+		vmaDestroyBufferWrap(allocator, memoryBuffer.vertexBuffer, &memoryBuffer.vertexBufferMemory);
+		vmaDestroyBufferWrap(allocator, memoryBuffer.indexBuffer, &memoryBuffer.indexBufferMemory);
 	}
 	
 	uint32 findMemoryType(uint32 typeFilter, VkMemoryPropertyFlags properties);
@@ -218,11 +221,16 @@ public:
 	const bool enableValidationLayers = false;
 #endif
 	VkInstance instance;
+
+	int32 majorApiVersion = 1;
+	int32 minorApiVersion = 1;
 	
 	VkDebugUtilsMessengerEXT debugMessenger;
 	
 	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
 	VkDevice logicalDevice;
+
+	VmaAllocator allocator;
 	
 	VkQueue graphicsQueue;
 	VkQueue presentQueue;

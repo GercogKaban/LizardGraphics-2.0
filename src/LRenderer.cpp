@@ -1,20 +1,20 @@
+#define VMA_IMPLEMENTATION
+#include "LRenderer.h"
 #include "pch.h"
 
-//
 #define private public
 #define protected public
 #include "Primitives.h"
 #undef private
 #undef protected
 
-#include "LRenderer.h"
-#include "Util.h"
-
 #define GLFW_INCLUDE_VULKAN
 #include <glfw3.h>
 
 #include "LWindow.h"
 #include "vulkan/vulkan.h"
+
+#include "Util.h"
 
 #include "gen_shaders.cxx"
 
@@ -57,6 +57,7 @@ void LRenderer::init()
     HANDLE_VK_ERROR(createSurface())
     HANDLE_VK_ERROR(pickPhysicalDevice())
     HANDLE_VK_ERROR(createLogicalDevice())
+    HANDLE_VK_ERROR(createAllocator())
     HANDLE_VK_ERROR(createSwapChain())
 
     initProjection();
@@ -116,7 +117,7 @@ DEBUG_CODE(
     }
     
     vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
-    
+    vmaDestroyAllocator(allocator);
     vkDestroyDevice(logicalDevice, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -217,10 +218,10 @@ VkResult LRenderer::createInstance()
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "Hello Triangle";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.applicationVersion = VK_MAKE_VERSION(majorApiVersion, minorApiVersion, 0);
     appInfo.pEngineName = "No Engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    appInfo.engineVersion = VK_MAKE_VERSION(majorApiVersion, minorApiVersion, 0);
+    appInfo.apiVersion = VK_MAKE_API_VERSION(0, majorApiVersion, minorApiVersion, 0);
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -594,8 +595,8 @@ void LRenderer::updateProjView()
     bNeedToUpdateProjView = false;
 }
 
-void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-                             VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties,
+                             VkBuffer& buffer, VmaAllocation& bufferMemory, uint32 vmaFlags)
 {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -603,18 +604,11 @@ void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemo
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    HANDLE_VK_ERROR(vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &buffer))
+    VmaAllocationCreateInfo allocInfo = {};
+    allocInfo.usage = properties;
+    allocInfo.flags = vmaFlags;
 
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
-
-    HANDLE_VK_ERROR(vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &bufferMemory))
-    HANDLE_VK_ERROR(vkBindBufferMemory(logicalDevice, buffer, bufferMemory, 0))
+    HANDLE_VK_ERROR(vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer, &bufferMemory, nullptr))
 }
 
 void LRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
@@ -664,6 +658,21 @@ void LRenderer::createUniformBuffers()
     //     createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
     //     vkMapMemory(logicalDevice, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
     // }
+}
+
+void LRenderer::vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData)
+{
+    HANDLE_VK_ERROR(vmaMapMemory(allocator, *memory, &mappedData))
+}
+
+void LRenderer::vmaUnmapWrap(VmaAllocator allocator, VmaAllocation* memory)
+{
+    vmaUnmapMemory(allocator, *memory);
+}
+
+void LRenderer::vmaDestroyBufferWrap(VmaAllocator allocator, VkBuffer& buffer, VmaAllocation* memory)
+{
+    vmaDestroyBuffer(allocator, buffer, *memory);
 }
 
 VkResult LRenderer::createCommandBuffers()
@@ -1023,6 +1032,23 @@ VkResult LRenderer::createLogicalDevice()
     vkGetDeviceQueue(logicalDevice, indices.presentFamily.value(), 0, &presentQueue);
     
     return VK_SUCCESS;
+}
+
+VkResult LRenderer::createAllocator()
+{
+    VmaVulkanFunctions vulkanFunctions = {};
+    vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo allocatorCreateInfo = {};
+    allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+    allocatorCreateInfo.vulkanApiVersion = VK_MAKE_API_VERSION(0, majorApiVersion, minorApiVersion, 0);
+    allocatorCreateInfo.physicalDevice = physicalDevice;
+    allocatorCreateInfo.device = logicalDevice;
+    allocatorCreateInfo.instance = instance;
+    allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+
+    return vmaCreateAllocator(&allocatorCreateInfo, &allocator);
 }
 
 bool LRenderer::isDeviceSuitable(VkPhysicalDevice device) const
