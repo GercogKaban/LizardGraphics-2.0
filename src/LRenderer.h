@@ -43,7 +43,7 @@ public:
 	};
 	
 	
-	LRenderer(const LWindow& window);
+	LRenderer(const std::unique_ptr<LWindow>& window);
 	~LRenderer();
 
 	const glm::mat4& getProjection() const {return projection;}
@@ -237,7 +237,7 @@ public:
 
 	VkSurfaceKHR surface;
 	VkSwapchainKHR swapChain;
-	class GLFWwindow* window;
+	GLFWwindow* window;
 	VkFormat swapChainImageFormat;
 	VkExtent2D swapChainExtent;
 	std::vector<VkImage> swapChainImages;
@@ -344,6 +344,7 @@ protected:
 				renderer->createObjectBuffer(object->getVertexBuffer(), resBuffer.first->second, LRenderer::BufferType::Vertex);
 				renderer->createObjectBuffer(object->getIndexBuffer(), resBuffer.first->second, LRenderer::BufferType::Index);
 			}
+			renderer->addPrimitve(object);
 		}
 		DEBUG_CODE(
 			bIsConstructing = false;

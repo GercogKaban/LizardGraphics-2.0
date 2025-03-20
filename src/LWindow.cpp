@@ -6,7 +6,8 @@
 
 LWindow::LWindow(const LWindowSpecs& wndSpecs)
 {
-	if (auto res = init(wndSpecs); res != WindowInitRes::SUCCESS)
+	specs = wndSpecs;
+	if (auto res = init(); res != WindowInitRes::SUCCESS)
 	{
 		LLogger::LogString(WindowInitRes::SUCCESS, true);
 	}
@@ -18,10 +19,8 @@ LWindow::~LWindow()
 	glfwTerminate();
 }
 
-LWindow::WindowInitRes LWindow::init(const LWindowSpecs& wndSpecs)
-{
-	specs = wndSpecs;
-	
+LWindow::WindowInitRes LWindow::init()
+{	
 	if (auto res = glfwInit(); res != GLFW_TRUE)
 	{
 		return WindowInitRes::GLFW_INIT_FAIL;

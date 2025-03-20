@@ -27,7 +27,7 @@ bool LRenderer::bFramebufferResized = false;
 std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
 std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
-LRenderer::LRenderer(const LWindow& window)
+LRenderer::LRenderer(const std::unique_ptr<LWindow>& window)
 {
     if (thisPtr)
     {
@@ -36,8 +36,8 @@ LRenderer::LRenderer(const LWindow& window)
     
     thisPtr = this;
     
-    this->window = window.getWindow();
-    specs = window.getWindowSpecs();
+    this->window = window.get()->getWindow();
+    specs = window.get()->getWindowSpecs();
     
     glfwSetWindowUserPointer(this->window, this);
     glfwSetFramebufferSizeCallback(this->window, framebufferResizeCallback);
@@ -721,34 +721,34 @@ VkResult LRenderer::createDescriptorPool()
 
 VkResult LRenderer::createDescriptorSets()
 {
-    // std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
-    // VkDescriptorSetAllocateInfo allocInfo{};
-    // allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    // allocInfo.descriptorPool = descriptorPool;
-    // allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight);
-    // allocInfo.pSetLayouts = layouts.data();
-    //
-    // descriptorSets.resize(maxFramesInFlight);
-    // HANDLE_VK_ERROR(vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()))
-    //     
-    // for (uint32 i = 0; i < maxFramesInFlight; ++i)
-    // {
-    //     VkDescriptorBufferInfo bufferInfo{};
-    //     bufferInfo.buffer = uniformBuffers[i];
-    //     bufferInfo.offset = 0;
-    //     bufferInfo.range = sizeof(PushConstants);
-    //
-    //     VkWriteDescriptorSet descriptorWrite{};
-    //     descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    //     descriptorWrite.dstSet = descriptorSets[i];
-    //     descriptorWrite.dstBinding = 0;
-    //     descriptorWrite.dstArrayElement = 0;
-    //     descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    //     descriptorWrite.descriptorCount = 1;
-    //     descriptorWrite.pBufferInfo = &bufferInfo;
-    //
-    //     vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
-    // }
+     //std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
+     //VkDescriptorSetAllocateInfo allocInfo{};
+     //allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+     //allocInfo.descriptorPool = descriptorPool;
+     //allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight);
+     //allocInfo.pSetLayouts = layouts.data();
+    
+     //descriptorSets.resize(maxFramesInFlight);
+     //HANDLE_VK_ERROR(vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()))
+     //    
+     //for (uint32 i = 0; i < maxFramesInFlight; ++i)
+     //{
+     //    VkDescriptorBufferInfo bufferInfo{};
+     //    bufferInfo.buffer = uniformBuffers[i];
+     //    bufferInfo.offset = 0;
+     //    bufferInfo.range = sizeof(PushConstants);
+    
+     //    VkWriteDescriptorSet descriptorWrite{};
+     //    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+     //    descriptorWrite.dstSet = descriptorSets[i];
+     //    descriptorWrite.dstBinding = 0;
+     //    descriptorWrite.dstArrayElement = 0;
+     //    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+     //    descriptorWrite.descriptorCount = 1;
+     //    descriptorWrite.pBufferInfo = &bufferInfo;
+    
+     //    vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
+     //}
     return VK_SUCCESS;
 }
 

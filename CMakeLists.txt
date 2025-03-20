@@ -4,8 +4,8 @@ project (LizardGraphics C CXX)
 set(CMAKE_SKIP_INSTALL_RULES ON)
 set(CMAKE_SUPPRESS_REGENERATION ON)
 
-file(GLOB HEADER_FILES src/*.h *.txt)
-file(GLOB SOURCE_FILES src/*.cpp)
+file(GLOB HEADER_FILES src/*.h)
+file(GLOB SOURCE_FILES src/*.cpp src/shaders/*.frag src/shaders/*.vert)
 
 if(WIN32)
     set(PYTHON_COMMAND python)

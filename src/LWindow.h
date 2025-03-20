@@ -5,6 +5,8 @@
 
 class LWindow
 {
+	friend class LRenderer;
+
 public:
 	enum class WindowMode
 	{
@@ -41,7 +43,7 @@ protected:
 		GLFW_CREATE_WINDOW_ERROR,
 	};
 
-	WindowInitRes init(const LWindowSpecs& wndSpecs);
+	WindowInitRes init();
 	LWindowSpecs specs;
 	
 	class GLFWwindow* _window = nullptr;
