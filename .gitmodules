@@ -7,3 +7,6 @@
 [submodule "VulkanMemoryAllocator"]
 	path = VulkanMemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+[submodule "tracy-profiler"]
+	path = tracy-profiler
+	url = https://github.com/wolfpld/tracy

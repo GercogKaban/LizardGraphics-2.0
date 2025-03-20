@@ -21,6 +21,7 @@ target_include_directories(LizardGraphics PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/glfw/include/GLFW>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/magic_enum/include>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/VulkanMemoryAllocator/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tracy-profiler/public>
     $<INSTALL_INTERFACE:src>
     ${Vulkan_INCLUDE_DIR}
 )
@@ -44,3 +45,7 @@ add_dependencies(LizardGraphics run_script)
 
 target_precompile_headers(LizardGraphics PUBLIC src/pch.h)
 target_compile_features(LizardGraphics PRIVATE cxx_std_20)
+
+
+add_subdirectory(tracy-profiler)
+add_compile_definitions(TRACY_ENABLE)
