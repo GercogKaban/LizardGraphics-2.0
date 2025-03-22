@@ -355,7 +355,6 @@ VkResult LRenderer::createDescriptorSetLayout()
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
     uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    uboLayoutBinding.pImmutableSamplers = nullptr; // Optional
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -459,16 +458,17 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
     dynamicState.dynamicStateCount = static_cast<uint32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
     
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstants);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1; // Optional
     pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+
+    VkPushConstantRange pushConstantRange = {};
     pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (!pipelineLayout)
@@ -568,16 +568,17 @@ void LRenderer::updateUniformBuffers(uint32 imageIndex)
         std::iota(indices.begin(), indices.end(), 0);
 
         #if defined(_MSC_VER)
-        std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i) {
-        if (auto objectPtr = primitives[i].lock())
+        std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i) 
         {
-            PushConstants data { projView * objectPtr->getModelMatrix() };
-            memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
-        }
-        else
-        {
+            if (auto objectPtr = primitives[i].lock())
+            {
+                PushConstants data{ projView * objectPtr->getModelMatrix() };
+                memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
+            }
+            else
+            {
                 // Object is expired. Handle accordingly if needed.
-        }
+            }
         });
 
         #else
@@ -754,8 +755,9 @@ void LRenderer::createInstancesStorageBuffers()
          int32 instancedArrayNum = 0;
          for (const auto& [_, primitivesNum] : primitiveCounter)
          {
+             int32 index = i * instancedArraysSize + instancedArrayNum;
              auto bufferSize = sizeof(PushConstants) * primitivesNum;
-             createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, primitivesData[i * instancedArraysSize + instancedArrayNum].buffer, primitivesData[i].memory);
+             createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, primitivesData[index].buffer, primitivesData[index].memory);
              ++instancedArrayNum;
          }
      }
@@ -823,7 +825,7 @@ VkResult LRenderer::createDescriptorPool()
 {
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSize.descriptorCount = static_cast<uint32>(maxFramesInFlight);
+    poolSize.descriptorCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size();
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -836,7 +838,7 @@ VkResult LRenderer::createDescriptorPool()
 
 VkResult LRenderer::createDescriptorSets()
 {
-     std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
+     std::vector<VkDescriptorSetLayout> layouts(static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size(), descriptorSetLayout);
      VkDescriptorSetAllocateInfo allocInfo{};
      allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
      allocInfo.descriptorPool = descriptorPool;
@@ -854,7 +856,7 @@ VkResult LRenderer::createDescriptorSets()
              auto& [_, primitivesNum] = *it;
 
              VkDescriptorBufferInfo bufferInfo{};
-             bufferInfo.buffer = primitivesData[i].buffer;
+             bufferInfo.buffer = primitivesData[i * primitiveCounter.size() + instancedArrayNum].buffer;
              bufferInfo.offset = 0;
              bufferInfo.range = sizeof(PushConstants) * primitivesNum;
 
@@ -868,8 +870,8 @@ VkResult LRenderer::createDescriptorSets()
              descriptorWrite.pBufferInfo = &bufferInfo;
 
              vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
+             ++instancedArrayNum;
          }
-         ++instancedArrayNum;
      }
     return VK_SUCCESS;
 }
