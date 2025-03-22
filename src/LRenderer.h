@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <unordered_map>
+#include <map>
 #include <string>
 
 #include "LWindow.h"
@@ -40,10 +41,11 @@ public:
 	struct GraphicsPipelineParams
 	{
 		VkPolygonMode polygonMode;
+		bool bInstanced;
 	};
 	
 	
-	LRenderer(const std::unique_ptr<LWindow>& window);
+	LRenderer(const std::unique_ptr<LWindow>& window, std::map<std::string, uint32> primitiveCounter);
 	~LRenderer();
 
 	const glm::mat4& getProjection() const {return projection;}
@@ -100,6 +102,14 @@ public:
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
 	VkResult createFramebuffers();
 	VkResult createCommandPool();
+
+	void updateUniformBuffers(uint32 imageIndex);
+
+	bool isEnoughInstanceSpace(const std::string& typeName)
+	{
+		uint32 counter = primitiveCounter[typeName];
+		return instancedPrimitiveMeshes[typeName].size() < counter;
+	}
 	
 	void initProjection();
 	void initView();
@@ -114,7 +124,8 @@ public:
 	
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties, VkBuffer& buffer, VmaAllocation& bufferMemory, uint32 vmaFlags = 0);
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-	void createUniformBuffers();
+	void createInstancesStorageBuffers();
+	uint32 findProperStageBufferSize() const;
 
 	void vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData);
 	void vmaUnmapWrap(VmaAllocator allocator, VmaAllocation* memory);
@@ -170,7 +181,6 @@ public:
 
 	void drawFrame();
 
-	// TODO: needs to be optimized and also this temp rotation should be disabled
 	void updatePushConstants(const LG::LGraphicsComponent& mesh);
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
@@ -204,7 +214,7 @@ public:
 
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 
-	void addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr);
+	void addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);
 	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
 
 	// properties
@@ -244,7 +254,8 @@ public:
 	std::vector<VkImageView> swapChainImageViews;
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 
-	VkPipeline graphicsPipeline;
+	VkPipeline graphicsPipelineInstanced;
+	VkPipeline graphicsPipelineRegular;
 	VkPipeline debugGraphicsPipeline;
 
 	VkRenderPass renderPass;
@@ -257,10 +268,6 @@ public:
 	VkCommandPool commandPool;
 	std::vector<VkCommandBuffer> commandBuffers;
 
-	std::vector<VkBuffer> uniformBuffers;
-	std::vector<VkDeviceMemory> uniformBuffersMemory;
-	std::vector<void*> uniformBuffersMapped;
-
 	std::vector<VkSemaphore> imageAvailableSemaphores;
 	std::vector<VkSemaphore> renderFinishedSemaphores;
 	std::vector<VkFence> inFlightFences;
@@ -269,8 +276,23 @@ public:
 
 	std::filesystem::path shadersPath;
 
-	const int32 maxFramesInFlight = 2;
+	static const int32 maxFramesInFlight = 2;
 	uint32 currentFrame = 0;
+
+	struct ObjectDataBuffer
+	{
+		VkBuffer buffer;
+		VmaAllocation memory;
+	};
+	
+	// TODO: should be destroyed
+	std::vector<ObjectDataBuffer> primitivesData;
+
+	// TODO: should be destroyed
+	ObjectDataBuffer stagingBuffer;
+	void* stagingBufferPtr;
+
+	std::map<std::string, uint32> primitiveCounter;
 
 	glm::mat4 projection;
 	
@@ -289,8 +311,11 @@ public:
 
 	bool bNeedToUpdateProjView = false;
 	
+	// TODO: doesn't work properly
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
+
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
+	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> instancedPrimitiveMeshes;
 };
 
 class RenderComponentBuilder
@@ -323,13 +348,13 @@ protected:
 //	}
 //)
 
-	static void adjustImpl(std::weak_ptr<LG::LGraphicsComponent> t)
+	static void adjustImpl(const std::weak_ptr<LG::LGraphicsComponent>& graphicsComponent)
 	{
 		DEBUG_CODE(
 			bIsConstructing = true;
 			)
 
-		auto object = t.lock();
+		auto object = graphicsComponent.lock();
 
 		// TODO: it worth to implement UE FName alternative to save some memory
 		//const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());
@@ -344,7 +369,7 @@ protected:
 				renderer->createObjectBuffer(object->getVertexBuffer(), resBuffer.first->second, LRenderer::BufferType::Vertex);
 				renderer->createObjectBuffer(object->getIndexBuffer(), resBuffer.first->second, LRenderer::BufferType::Index);
 			}
-			renderer->addPrimitve(object);
+			renderer->addPrimitive(object);
 		}
 		DEBUG_CODE(
 			bIsConstructing = false;

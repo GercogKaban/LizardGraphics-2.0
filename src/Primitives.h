@@ -126,4 +126,19 @@ namespace LG
             return indicesPlane;
         }
     };
+
+    template<typename Component>
+    bool isInstancePrimitive(Component* ptr)
+    {
+        if (dynamic_cast<LG::LCube*>(ptr))
+        {
+            return true;
+        }
+        else if (dynamic_cast<LG::LPlane*>(ptr))
+        {
+            return true;
+        }
+        return false;
+    }
+
 }

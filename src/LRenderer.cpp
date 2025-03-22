@@ -27,7 +27,8 @@ bool LRenderer::bFramebufferResized = false;
 std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
 std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
-LRenderer::LRenderer(const std::unique_ptr<LWindow>& window)
+LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, std::map<std::string, uint32> primitiveCounter)
+    :primitiveCounter(primitiveCounter)
 {
     if (thisPtr)
     {
@@ -67,20 +68,25 @@ void LRenderer::init()
     HANDLE_VK_ERROR(createRenderPass())
     HANDLE_VK_ERROR(createDescriptorSetLayout())
 
-
     GraphicsPipelineParams mainPipelineParams;
+    mainPipelineParams.bInstanced = true;
     mainPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_FILL;
-    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipeline))
+    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineInstanced))
 
-DEBUG_CODE(
-    GraphicsPipelineParams debugPipelineParams;
-    debugPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_LINE;
-    HANDLE_VK_ERROR(createGraphicsPipeline(debugPipelineParams, debugGraphicsPipeline))
-)
+    mainPipelineParams.bInstanced = false;
+    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineRegular))
+
+//DEBUG_CODE(
+//    GraphicsPipelineParams debugPipelineParams;
+//    debugPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_LINE;
+//    HANDLE_VK_ERROR(createGraphicsPipeline(debugPipelineParams, debugGraphicsPipeline))
+//)
 
     HANDLE_VK_ERROR(createFramebuffers())
     HANDLE_VK_ERROR(createCommandPool())
-    createUniformBuffers();
+
+    createInstancesStorageBuffers();
+
     HANDLE_VK_ERROR(createDescriptorPool())
     HANDLE_VK_ERROR(createDescriptorSets())
     HANDLE_VK_ERROR(createCommandBuffers())
@@ -91,22 +97,16 @@ void LRenderer::cleanup()
 {
     cleanupSwapChain();
 
-    // for (uint32 i = 0; i < maxFramesInFlight; ++i)
-    // {
-    //     vkDestroyBuffer(logicalDevice, uniformBuffers[i], nullptr);
-    //     vkFreeMemory(logicalDevice, uniformBuffersMemory[i], nullptr);
-    // }
-
     vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
 
+//DEBUG_CODE(
+//    vkDestroyPipeline(logicalDevice, debugGraphicsPipeline, nullptr);
+//)
 
-DEBUG_CODE(
-    vkDestroyPipeline(logicalDevice, debugGraphicsPipeline, nullptr);
-)
-
-    vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
-    //vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+    vkDestroyPipeline(logicalDevice, graphicsPipelineInstanced, nullptr);
+    vkDestroyPipeline(logicalDevice, graphicsPipelineRegular, nullptr);
+    vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
     vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
     
     for (uint32 i = 0; i < maxFramesInFlight; ++i)
@@ -117,7 +117,16 @@ DEBUG_CODE(
     }
     
     vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
+
+    for (auto& [buffer, allocation] : primitivesData)
+    {
+        vmaDestroyBuffer(allocator, buffer, allocation);
+    }
+
+    vmaUnmapMemory(allocator, stagingBuffer.memory);
+    vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.memory);
     vmaDestroyAllocator(allocator);
+
     vkDestroyDevice(logicalDevice, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -337,7 +346,7 @@ VkResult LRenderer::createDescriptorSetLayout()
 {
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
     uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     uboLayoutBinding.pImmutableSamplers = nullptr; // Optional
@@ -352,7 +361,7 @@ VkResult LRenderer::createDescriptorSetLayout()
 
 VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut)
 {
-    VkShaderModule vertShaderModule = createShaderModule(genericVert);
+    VkShaderModule vertShaderModule = params.bInstanced? createShaderModule(genericInstancedVert) : createShaderModule(genericVert);
     VkShaderModule fragShaderModule = createShaderModule(genericFrag);
     
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
@@ -536,6 +545,38 @@ VkResult LRenderer::createCommandPool()
     return vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &commandPool);
 }
 
+void LRenderer::updateUniformBuffers(uint32 imageIndex)
+{
+    uint64 instancedArraysSize = instancedPrimitiveMeshes.size();
+
+    int32 instancedArrayNum = 0;
+    for (const auto& [_, primitives] : instancedPrimitiveMeshes)
+    {
+        int32 primitiveNum = 0;
+
+        // buffer array
+        VkBuffer bufferToCopy = primitivesData[imageIndex * instancedArraysSize + instancedArrayNum].buffer;
+
+        for (const auto& object : primitives)
+        {
+            if (std::shared_ptr<LG::LGraphicsComponent> objectPtr = object.lock())
+            {
+                PushConstants data;
+                data.mvpMatrix = projView * objectPtr->getModelMatrix();
+                memcpy((uint8*)stagingBufferPtr + primitiveNum * sizeof(PushConstants), &data, sizeof(PushConstants));
+            }
+            else
+            {
+                // Object is expired. Should we delete it?
+                // The problem is we will still have extra space in storage/uniform buffer
+            }
+            ++primitiveNum;
+        }
+        ++instancedArrayNum;
+
+        copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(PushConstants));
+    }
+}
 
 void LRenderer::setProjection(float degrees, float zNear, float zFar)
 {
@@ -645,19 +686,47 @@ void LRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize 
     vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
 }
 
-void LRenderer::createUniformBuffers()
+void LRenderer::createInstancesStorageBuffers()
 {
-    // VkDeviceSize bufferSize = sizeof(PushConstants);
-    //
-    // uniformBuffers.resize(maxFramesInFlight);
-    // uniformBuffersMemory.resize(maxFramesInFlight);
-    // uniformBuffersMapped.resize(maxFramesInFlight);
-    //
-    // for (uint32 i = 0; i < maxFramesInFlight; ++i)
-    // {
-    //     createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
-    //     vkMapMemory(logicalDevice, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
-    // }
+     VkDeviceSize globalBufferSize = findProperStageBufferSize();
+
+     if (globalBufferSize == 0)
+     {
+         return;
+     }
+
+     // stage buffer to copy from CPU to GPU
+     createBuffer(globalBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO, stagingBuffer.buffer, stagingBuffer.memory, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+     vmaMapMemory(allocator, stagingBuffer.memory, &stagingBufferPtr);
+
+     uint64 instancedArraysSize = primitiveCounter.size();
+
+     primitivesData.resize(instancedArraysSize * maxFramesInFlight);
+
+     for (uint32 i = 0; i < maxFramesInFlight; ++i)
+     {
+         int32 instancedArrayNum = 0;
+         for (const auto& [_, primitivesNum] : primitiveCounter)
+         {
+             auto bufferSize = sizeof(PushConstants) * primitivesNum;
+             createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, primitivesData[i * instancedArraysSize + instancedArrayNum].buffer, primitivesData[i].memory);
+             ++instancedArrayNum;
+         }
+     }
+}
+
+uint32 LRenderer::findProperStageBufferSize() const
+{
+    uint32 maxPrimitiveCounter = 0;
+    for (const auto& [_, counter] : primitiveCounter)
+    {
+        uint32 primitivesNum = counter;
+        if (primitivesNum > maxPrimitiveCounter)
+        {
+            maxPrimitiveCounter = primitivesNum;
+        }
+    }
+    return maxPrimitiveCounter * sizeof(PushConstants);;
 }
 
 void LRenderer::vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData)
@@ -707,48 +776,55 @@ uint32 LRenderer::findMemoryType(uint32 typeFilter, VkMemoryPropertyFlags proper
 VkResult LRenderer::createDescriptorPool()
 {
     VkDescriptorPoolSize poolSize{};
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSize.descriptorCount = static_cast<uint32>(maxFramesInFlight);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = 1;
     poolInfo.pPoolSizes = &poolSize;
-    poolInfo.maxSets = static_cast<uint32_t>(maxFramesInFlight);
+    poolInfo.maxSets = static_cast<uint32_t>(maxFramesInFlight) * primitiveCounter.size();
 
     return vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &descriptorPool);
 }
 
 VkResult LRenderer::createDescriptorSets()
 {
-     //std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
-     //VkDescriptorSetAllocateInfo allocInfo{};
-     //allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-     //allocInfo.descriptorPool = descriptorPool;
-     //allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight);
-     //allocInfo.pSetLayouts = layouts.data();
+     std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
+     VkDescriptorSetAllocateInfo allocInfo{};
+     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+     allocInfo.descriptorPool = descriptorPool;
+     allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size();
+     allocInfo.pSetLayouts = layouts.data();
     
-     //descriptorSets.resize(maxFramesInFlight);
-     //HANDLE_VK_ERROR(vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()))
-     //    
-     //for (uint32 i = 0; i < maxFramesInFlight; ++i)
-     //{
-     //    VkDescriptorBufferInfo bufferInfo{};
-     //    bufferInfo.buffer = uniformBuffers[i];
-     //    bufferInfo.offset = 0;
-     //    bufferInfo.range = sizeof(PushConstants);
-    
-     //    VkWriteDescriptorSet descriptorWrite{};
-     //    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-     //    descriptorWrite.dstSet = descriptorSets[i];
-     //    descriptorWrite.dstBinding = 0;
-     //    descriptorWrite.dstArrayElement = 0;
-     //    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-     //    descriptorWrite.descriptorCount = 1;
-     //    descriptorWrite.pBufferInfo = &bufferInfo;
-    
-     //    vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
-     //}
+     descriptorSets.resize(allocInfo.descriptorSetCount);
+     HANDLE_VK_ERROR(vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()))
+         
+     for (uint32 i = 0; i < maxFramesInFlight; ++i)
+     {
+         uint32 instancedArrayNum = 0;
+         for (auto it = primitiveCounter.begin(); it != primitiveCounter.end(); ++it)
+         {
+             auto& [_, primitivesNum] = *it;
+
+             VkDescriptorBufferInfo bufferInfo{};
+             bufferInfo.buffer = primitivesData[i].buffer;
+             bufferInfo.offset = 0;
+             bufferInfo.range = sizeof(PushConstants) * primitivesNum;
+
+             VkWriteDescriptorSet descriptorWrite{};
+             descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+             descriptorWrite.dstSet = descriptorSets[i * primitiveCounter.size() + instancedArrayNum];
+             descriptorWrite.dstBinding = 0;
+             descriptorWrite.dstArrayElement = 0;
+             descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+             descriptorWrite.descriptorCount = 1;
+             descriptorWrite.pBufferInfo = &bufferInfo;
+
+             vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
+         }
+         ++instancedArrayNum;
+     }
     return VK_SUCCESS;
 }
 
@@ -810,6 +886,27 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     
+    auto drawInstancedMeshes = [this, commandBuffer]()
+        {
+            uint32 instanceArrayNum = 0;
+            for (const auto& [typeName, primitives] : instancedPrimitiveMeshes)
+            {
+                const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
+                VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
+                VkDeviceSize offsets[] = { 0 };
+
+                auto indicesCount = primitives[0].lock()->getIndexBuffer().size();
+                auto instancesCount = primitives.size();
+
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * instancedPrimitiveMeshes.size() + instanceArrayNum], 0, nullptr);
+
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                vkCmdDrawIndexed(commandBuffer, indicesCount, instancesCount, 0, 0, 0);
+                ++instanceArrayNum;
+            }
+        };
+
     auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
         {
             for (auto it = meshes.begin(); it != meshes.end(); ++it)
@@ -837,13 +934,17 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
         };
 
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineInstanced);
+    drawInstancedMeshes();
+     
+    // TODO: new (non-instanced) pipeline need to be implemented for this 
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineRegular);
     drawMeshes(primitiveMeshes);
 
-    DEBUG_CODE(
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, debugGraphicsPipeline);
-        drawMeshes(debugMeshes);
-              )
+    //DEBUG_CODE(
+    //    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, debugGraphicsPipeline);
+    //    drawMeshes(debugMeshes);
+    //          )
   
     vkCmdEndRenderPass(commandBuffer);
     HANDLE_VK_ERROR(vkEndCommandBuffer(commandBuffer))
@@ -902,6 +1003,8 @@ void LRenderer::drawFrame()
     {
         RAISE_VK_ERROR(result)
     }
+
+    updateUniformBuffers(currentFrame);
     
     vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
     
@@ -1267,9 +1370,21 @@ uint32 LRenderer::getPushConstantSize(VkPhysicalDevice physicalDeviceIn) const
     return deviceProperties.limits.maxPushConstantsSize;
 }
 
-void LRenderer::addPrimitve(std::weak_ptr<LG::LGraphicsComponent> ptr)
+void LRenderer::addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
-    primitiveMeshes.push_back(ptr);
+    if (auto sharedPtr = ptr.lock())
+    {
+        const auto& typeName = sharedPtr->getTypeName();
+        if (isEnoughInstanceSpace(typeName) && LG::isInstancePrimitive(sharedPtr.get()))
+        {
+            auto& instancesArray = instancedPrimitiveMeshes[typeName];
+            instancesArray.emplace_back(ptr);
+        }
+        else
+        {
+            primitiveMeshes.push_back(ptr);
+        }
+    }
 }
 
 DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
