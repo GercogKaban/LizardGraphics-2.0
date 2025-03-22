@@ -561,9 +561,10 @@ void LRenderer::updateUniformBuffers(uint32 imageIndex)
         // buffer array
         VkBuffer bufferToCopy = primitivesData[imageIndex * instancedArraysSize + instancedArrayNum].buffer;
 
-        static std::vector<size_t> indices(primitives.size());
+        std::vector<size_t> indices(primitives.size());
         std::iota(indices.begin(), indices.end(), 0);
 
+        #if defined(_MSC_VER)
         std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i) {
         if (auto objectPtr = primitives[i].lock())
         {
@@ -575,6 +576,44 @@ void LRenderer::updateUniformBuffers(uint32 imageIndex)
                 // Object is expired. Handle accordingly if needed.
         }
         });
+
+        #else
+        // Decide on the number of threads based on the number of available cores
+        size_t numThreads = std::thread::hardware_concurrency();
+        size_t chunkSize = indices.size() / numThreads;
+        
+        // Vector to store threads
+        std::vector<std::thread> threads;
+
+        // Launch threads
+        for (size_t t = 0; t < numThreads; ++t) 
+        {
+            size_t startIdx = t * chunkSize;
+            size_t endIdx = (t == numThreads - 1) ? indices.size() : startIdx + chunkSize;
+            
+            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx]() 
+                {
+                    for (size_t i = startIdx; i < endIdx; ++i) {
+                        if (auto objectPtr = primitives[i].lock()) 
+                        {
+                            PushConstants data { projView * objectPtr->getModelMatrix() };
+                            memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
+                        } 
+                        else 
+                        {
+                            // Object is expired. Handle accordingly if needed.
+                        }
+                    }
+                }
+            );
+        }
+
+        // Join threads
+        for (auto& thread : threads) 
+        {
+            thread.join();
+        }
+        #endif
 
         ++instancedArrayNum;
 

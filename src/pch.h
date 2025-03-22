@@ -10,6 +10,7 @@
 #include <fstream>
 #include <chrono>
 #include <execution>
+#include <numeric>
 #include <ranges>
 
 #define GLM_FORCE_RADIANS
