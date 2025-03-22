@@ -9,6 +9,8 @@
 #include <print>
 #include <fstream>
 #include <chrono>
+#include <execution>
+#include <ranges>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE

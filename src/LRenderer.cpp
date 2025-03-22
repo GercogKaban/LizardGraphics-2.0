@@ -11,6 +11,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <glfw3.h>
 
+#define TRACY_ENABLE
+#include <tracy/Tracy.hpp>
+
 #include "LWindow.h"
 #include "vulkan/vulkan.h"
 
@@ -547,6 +550,7 @@ VkResult LRenderer::createCommandPool()
 
 void LRenderer::updateUniformBuffers(uint32 imageIndex)
 {
+    ZoneScoped;
     uint64 instancedArraysSize = instancedPrimitiveMeshes.size();
 
     int32 instancedArrayNum = 0;
@@ -557,21 +561,21 @@ void LRenderer::updateUniformBuffers(uint32 imageIndex)
         // buffer array
         VkBuffer bufferToCopy = primitivesData[imageIndex * instancedArraysSize + instancedArrayNum].buffer;
 
-        for (const auto& object : primitives)
+        static std::vector<size_t> indices(primitives.size());
+        std::iota(indices.begin(), indices.end(), 0);
+
+        std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i) {
+        if (auto objectPtr = primitives[i].lock())
         {
-            if (std::shared_ptr<LG::LGraphicsComponent> objectPtr = object.lock())
-            {
-                PushConstants data;
-                data.mvpMatrix = projView * objectPtr->getModelMatrix();
-                memcpy((uint8*)stagingBufferPtr + primitiveNum * sizeof(PushConstants), &data, sizeof(PushConstants));
-            }
-            else
-            {
-                // Object is expired. Should we delete it?
-                // The problem is we will still have extra space in storage/uniform buffer
-            }
-            ++primitiveNum;
+            PushConstants data { projView * objectPtr->getModelMatrix() };
+            memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
         }
+        else
+        {
+                // Object is expired. Handle accordingly if needed.
+        }
+        });
+
         ++instancedArrayNum;
 
         copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(PushConstants));
@@ -853,6 +857,8 @@ VkResult LRenderer::createSyncObjects()
 
 void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageIndex)
 {
+    ZoneScoped;
+
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0; // Optional
@@ -934,12 +940,17 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
         };
 
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineInstanced);
-    drawInstancedMeshes();
+    {
+        ZoneScopedN("Instance pass");
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineInstanced);
+        drawInstancedMeshes();
+    }
      
-    // TODO: new (non-instanced) pipeline need to be implemented for this 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineRegular);
-    drawMeshes(primitiveMeshes);
+    {
+        ZoneScopedN("Regular pass");
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineRegular);
+        drawMeshes(primitiveMeshes);
+    }
 
     //DEBUG_CODE(
     //    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, debugGraphicsPipeline);
