@@ -191,6 +191,8 @@ VkResult LRenderer::setupDebugMessenger()
     VkDebugUtilsMessengerCreateInfoEXT createInfo;
     populateDebugMessengerCreateInfo(createInfo);
 
+    createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&createInfo;
+
     return CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &debugMessenger);
 }
 
@@ -242,8 +244,7 @@ VkResult LRenderer::createInstance()
     
     // required extension request
     uint32_t glfwExtensionCount = 0;
-    const char** glfwExtensions;
-    glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    auto extensions = getRequiredExtensions();
     
 #ifdef __APPLE__
     std::vector<const char*> instanceExtensions(glfwExtensionCount);
@@ -252,8 +253,8 @@ VkResult LRenderer::createInstance()
     createInfo.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
     createInfo.ppEnabledExtensionNames = instanceExtensions.data();
 #else
-    createInfo.enabledExtensionCount = glfwExtensionCount;
-    createInfo.ppEnabledExtensionNames = glfwExtensions;
+    createInfo.enabledExtensionCount = extensions.size();
+    createInfo.ppEnabledExtensionNames = extensions.data();
 #endif
 
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
@@ -268,8 +269,10 @@ VkResult LRenderer::createInstance()
     else 
     {
         createInfo.enabledLayerCount = 0;
+
         createInfo.pNext = nullptr;
     }
+
     return vkCreateInstance(&createInfo, nullptr, &instance);
 }
 
@@ -392,7 +395,7 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
     vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();;
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;

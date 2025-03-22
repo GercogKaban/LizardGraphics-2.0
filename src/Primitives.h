@@ -111,6 +111,9 @@ namespace LG
 
     class LPlane : public LGraphicsComponent
     {
+
+    public:
+
         LPlane()
         {
             typeName = std::string("LPlane");
