@@ -228,7 +228,7 @@ public:
 	const bool enableValidationLayers = false;
 #else
 	// TODO: for now it always false, because it causes a strange crash in vkCreateGraphicsPipelines 
-	const bool enableValidationLayers = true;
+	const bool enableValidationLayers = false;
 #endif
 	VkInstance instance;
 

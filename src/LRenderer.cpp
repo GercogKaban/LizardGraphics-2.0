@@ -247,15 +247,10 @@ VkResult LRenderer::createInstance()
     auto extensions = getRequiredExtensions();
     
 #ifdef __APPLE__
-    std::vector<const char*> instanceExtensions(glfwExtensionCount);
-    memcpy(instanceExtensions.data(), glfwExtensions, sizeof(const char*) * glfwExtensionCount);
-    instanceExtensions.push_back("VK_KHR_portability_enumeration");
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
-    createInfo.ppEnabledExtensionNames = instanceExtensions.data();
-#else
+    extensions.push_back("VK_KHR_portability_enumeration");
+#endif
     createInfo.enabledExtensionCount = extensions.size();
     createInfo.ppEnabledExtensionNames = extensions.data();
-#endif
 
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
     if (enableValidationLayers) 
