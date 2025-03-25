@@ -4,6 +4,15 @@ project (LizardGraphics C CXX)
 set(CMAKE_SKIP_INSTALL_RULES ON)
 set(CMAKE_SUPPRESS_REGENERATION ON)
 
+find_program(CLANG_C_COMPILER clang)
+find_program(CLANG_CXX_COMPILER clang++)
+
+if (CLANG_C_COMPILER AND CLANG_CXX_COMPILER)
+    message("Found clang")
+    set(CMAKE_C_COMPILER ${CLANG_C_COMPILER} CACHE STRING "C Compiler" FORCE)
+    set(CMAKE_CXX_COMPILER ${CLANG_CXX_COMPILER} CACHE STRING "C++ Compiler" FORCE)
+endif()
+
 file(GLOB HEADER_FILES src/*.h)
 file(GLOB SOURCE_FILES src/*.cpp src/shaders/*.frag src/shaders/*.vert)
 
@@ -20,8 +29,9 @@ target_include_directories(LizardGraphics PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/glfw/include/GLFW>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/magic_enum/include>
-	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/VulkanMemoryAllocator/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/VulkanMemoryAllocator/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tracy-profiler/public>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdParty>
     $<INSTALL_INTERFACE:src>
     ${Vulkan_INCLUDE_DIR}
 )

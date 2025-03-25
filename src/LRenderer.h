@@ -95,15 +95,25 @@ public:
     VkResult createLogicalDevice();
 	VkResult createAllocator();
 	VkResult createSurface();
+	VkImageView  createImageView(VkImage image, VkFormat format);
 	VkResult createImageViews();
 	VkResult createRenderPass();
 	VkResult createDescriptorSetLayout();
 	VkResult createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut);
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
 	VkResult createFramebuffers();
+	VkResult createImage(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory);
+	VkResult createTextureImage();
+	VkResult createTextureSampler();
+	void createTextureImageView();
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 	VkResult createCommandPool();
+	VkCommandBuffer beginSingleTimeCommands();
+	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
 
-	void updateUniformBuffers(uint32 imageIndex);
+
+	void updateStorageBuffers(uint32 imageIndex);
 
 	bool isEnoughInstanceSpace(const std::string& typeName)
 	{
@@ -213,6 +223,7 @@ public:
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
 
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
+	uint32 getMaxAnisotropy(VkPhysicalDevice physicalDeviceIn) const;
 
 	void addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);
 	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
@@ -226,9 +237,10 @@ public:
 
 #if NDEBUG
 	const bool enableValidationLayers = false;
-#else
-	// TODO: for now it always false, because it causes a strange crash in vkCreateGraphicsPipelines 
+#elif __APPLE__
 	const bool enableValidationLayers = false;
+#else 
+	const bool enableValidationLayers = true;
 #endif
 	VkInstance instance;
 
@@ -253,6 +265,11 @@ public:
 	std::vector<VkImage> swapChainImages;
 	std::vector<VkImageView> swapChainImageViews;
 	std::vector<VkFramebuffer> swapChainFramebuffers;
+
+	VkImage textureImage;
+	VmaAllocation textureImageMemory;
+	VkImageView textureImageView;
+	VkSampler textureSampler;
 
 	VkPipeline graphicsPipelineInstanced;
 	VkPipeline graphicsPipelineRegular;
@@ -284,6 +301,9 @@ public:
 		VkBuffer buffer;
 		VmaAllocation memory;
 	};
+
+	// used for multithread write
+	std::unordered_map<std::string, std::vector<uint32>> primitiveDataIndices;
 	
 	// TODO: should be destroyed
 	std::vector<ObjectDataBuffer> primitivesData;
