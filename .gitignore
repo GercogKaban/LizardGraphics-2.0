@@ -301,7 +301,6 @@ Doxyfile/
 log.txt
 
 models
-textures
 CMakeSettings.json
 android-ndk-r25b
 .DS_Store
