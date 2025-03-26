@@ -4,10 +4,10 @@
 
 const std::vector<LG::LGraphicsComponent::Vertex> LG::verticesPlane =
 {
-    {{-0.5f, -0.5f, 0.0f},{1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}} ,
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f},  {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
+    {{-0.5f, 0.0f, 0.5f},{1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}} ,
+    {{0.5f, 0.0f, 0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.0f, -0.5f},  {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 
 const std::vector<uint16> LG::indicesPlane =
@@ -35,7 +35,7 @@ const std::vector<LG::LGraphicsComponent::Vertex> LG::verticesCube =
     {{ 0.5f,  0.5f, -0.5f}, {0.5f, 1.0f, 0.0f}, {0.0f, 1.0f}}, // 11 (for top)
 
     {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.5f, 0.0f}, {0.0f, 0.0f}}, // 12 (for bottom)
-    {{ 0.5f, -0.5f, -0.5f}, {0.5f, 1.0f, 0.5f}, {1.0f, 1.0f}}, // 13 (for bottom)
+    {{ 0.5f, -0.5f, -0.5f}, {0.5f, 1.0f, 0.5f}, {0.0f, 0.0f}}, // 13 (for bottom)
 };
 
 const std::vector<uint16_t> LG::indicesCube =

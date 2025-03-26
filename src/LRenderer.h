@@ -45,7 +45,7 @@ public:
 	};
 	
 	
-	LRenderer(const std::unique_ptr<LWindow>& window, std::map<std::string, uint32> primitiveCounter);
+	LRenderer(const std::unique_ptr<LWindow>& window, std::unordered_map<std::string, uint32> primitiveCounter);
 	~LRenderer();
 
 	const glm::mat4& getProjection() const {return projection;}
@@ -312,7 +312,7 @@ public:
 	ObjectDataBuffer stagingBuffer;
 	void* stagingBufferPtr;
 
-	std::map<std::string, uint32> primitiveCounter;
+	std::unordered_map<std::string, uint32> primitiveCounter;
 
 	glm::mat4 projection;
 	

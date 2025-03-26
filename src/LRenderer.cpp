@@ -33,7 +33,7 @@ bool LRenderer::bFramebufferResized = false;
 std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
 std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
-LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, std::map<std::string, uint32> primitiveCounter)
+LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, std::unordered_map<std::string, uint32> primitiveCounter)
     :primitiveCounter(primitiveCounter)
 {
     if (thisPtr)
@@ -799,9 +799,6 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
     int32 instancedArrayNum = 0;
     for (const auto& [primitiveName, primitives] : instancedPrimitiveMeshes)
     {
-        int32 primitiveNum = 0;
-
-
         // buffer array
         VkBuffer bufferToCopy = primitivesData[imageIndex * instancedArraysSize + instancedArrayNum].buffer;
         const auto& indices = primitiveDataIndices[primitiveName];
@@ -995,7 +992,7 @@ uint32 LRenderer::findProperStageBufferSize() const
             maxPrimitiveCounter = primitivesNum;
         }
     }
-    return maxPrimitiveCounter * sizeof(PushConstants);;
+    return maxPrimitiveCounter * sizeof(PushConstants);
 }
 
 void LRenderer::vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData)
