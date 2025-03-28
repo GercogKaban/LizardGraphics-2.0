@@ -95,7 +95,7 @@ public:
     VkResult createLogicalDevice();
 	VkResult createAllocator();
 	VkResult createSurface();
-	VkImageView  createImageView(VkImage image, VkFormat format);
+	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
 	VkResult createImageViews();
 	VkResult createRenderPass();
 	VkResult createDescriptorSetLayout();
@@ -106,9 +106,13 @@ public:
 	VkResult createTextureImage();
 	VkResult createTextureSampler();
 	void createTextureImageView();
-	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect);
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 	VkResult createCommandPool();
+	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+	VkFormat findDepthFormat();
+	//bool hasStencilComponent(VkFormat format) const;
+	void createDepthResources();
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
 
@@ -270,6 +274,10 @@ public:
 	VmaAllocation textureImageMemory;
 	VkImageView textureImageView;
 	VkSampler textureSampler;
+
+	std::vector<VkImage> depthImages;
+	std::vector<VmaAllocation> depthImagesMemory;
+	std::vector<VkImageView> depthImagesView;
 
 	VkPipeline graphicsPipelineInstanced;
 	VkPipeline graphicsPipelineRegular;
