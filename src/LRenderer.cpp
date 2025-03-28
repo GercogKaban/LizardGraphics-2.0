@@ -367,7 +367,6 @@ VkResult LRenderer::createRenderPass()
     dependency.srcAccessMask = 0;
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     VkSubpassDependency depthDependency{};
     depthDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -376,7 +375,6 @@ VkResult LRenderer::createRenderPass()
     depthDependency.srcAccessMask = 0;
     depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    depthDependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     std::array<VkSubpassDependency, 2> dependencies = { dependency, depthDependency};
     std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
@@ -624,19 +622,11 @@ VkResult LRenderer::createImage(uint32 width, uint32 height, VkFormat format, Vk
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    HANDLE_VK_ERROR(vkCreateImage(logicalDevice, &imageInfo, nullptr, &image))
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(logicalDevice, image, &memRequirements);
-
     VmaAllocationCreateInfo createInfo{};
     createInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    createInfo.memoryTypeBits = findMemoryType(memRequirements.memoryTypeBits, properties);
 
     VmaAllocationInfo allocInfo{};
-    HANDLE_VK_ERROR(vmaAllocateMemory(allocator, &memRequirements, &createInfo, &imageMemory, &allocInfo))
-
-    return vkBindImageMemory(logicalDevice, image, imageMemory->GetMemory(), 0);
+    return vmaCreateImage(allocator, &imageInfo, &createInfo, &image, &imageMemory, &allocInfo);
 }
 
 VkResult LRenderer::createTextureImage()
@@ -854,7 +844,6 @@ void LRenderer::createDepthResources()
     for (int32 i = 0; i < swapChainImages.size(); ++i)
     {
         createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImages[i], depthImagesMemory[i]);
-        transitionImageLayout(depthImages[i], depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
         depthImagesView[i] = createImageView(depthImages[i], depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 }
