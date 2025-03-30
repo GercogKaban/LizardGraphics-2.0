@@ -61,6 +61,7 @@ public:
 		VkImage image;
 		VkImageView imageView;
 		VmaAllocation allocation;
+		uint32 mipLevels;
 	};
 	
 	LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData);
@@ -116,7 +117,7 @@ protected:
     VkResult createLogicalDevice();
 	VkResult createAllocator();
 	VkResult createSurface();
-	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
+	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32 mipLevels);
 	VkResult createImageViews();
 	VkResult createRenderPass();
 	VkResult createDescriptorSetLayout();
@@ -124,13 +125,14 @@ protected:
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
 	VkResult createFramebuffers();
 	VkResult createImage(const std::string& texturePath, Image& imageOut);
-	VkResult createImageInternal(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory);
+	VkResult createImageInternal(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory, uint32 mipLevels);
 	VkResult loadTextureImage(const std::string& texturePath);
-	VkResult createTextureSampler();
-	void createTextureImageView(Image& imageInOut);
+	VkResult createTextureSampler(uint32 mipLevels);
+	void createTextureImageView(Image& imageInOut, uint32 mipLevels);
 	void initStaticDataTextures();
-	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect);
-	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect, uint32 mipLevels);
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32 width, uint32 height);
+	void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32 mipLevels);
 	VkResult createCommandPool();
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 	VkFormat findDepthFormat();
@@ -289,7 +291,7 @@ protected:
 	std::vector<VkImageView> swapChainImageViews;
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 
-	VkSampler textureSampler;
+	std::unordered_map<uint32, VkSampler> textureSamplers;
 
 	// TODO: should be packed to the Image I guess
 	std::vector<VkImage> depthImages;
