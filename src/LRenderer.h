@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <map>
 #include <string>
+#include <set>
 
 #include "LWindow.h"
 #include "Primitives.h"
@@ -26,6 +27,12 @@ class LRenderer
 	friend class RenderComponentBuilder;
 	
 public:
+
+	struct StaticInitData
+	{
+		std::unordered_map<std::string, uint32> primitiveCounter;
+		std::set<std::string> textures;
+	};
 	
 	struct VkMemoryBuffer
 	{
@@ -36,6 +43,11 @@ public:
 	struct PushConstants
 	{
 		glm::mat4 mvpMatrix;
+
+		uint32 textureId = 0;
+		uint32 reserved1 = 0;
+		uint32 reserved2 = 0;
+		uint32 reserved3 = 0;
 	} pushConstants;
 
 	struct GraphicsPipelineParams
@@ -43,9 +55,15 @@ public:
 		VkPolygonMode polygonMode;
 		bool bInstanced;
 	};
+
+	struct Image
+	{
+		VkImage image;
+		VkImageView imageView;
+		VmaAllocation allocation;
+	};
 	
-	
-	LRenderer(const std::unique_ptr<LWindow>& window, std::unordered_map<std::string, uint32> primitiveCounter);
+	LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData);
 	~LRenderer();
 
 	const glm::mat4& getProjection() const {return projection;}
@@ -63,12 +81,15 @@ public:
 	void setCameraFront(const glm::vec3& cameraFront);
 	void setCameraPosition(const glm::vec3& cameraPosition);
 
+	void drawFrame();
+	void exit();
+
 	static LRenderer* get()
 	{
 		return thisPtr;
 	}
 
-// protected:
+protected:
 
 	static LRenderer* thisPtr;
 
@@ -102,26 +123,26 @@ public:
 	VkResult createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut);
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
 	VkResult createFramebuffers();
-	VkResult createImage(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory);
-	VkResult createTextureImage();
+	VkResult createImage(const std::string& texturePath, Image& imageOut);
+	VkResult createImageInternal(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory);
+	VkResult loadTextureImage(const std::string& texturePath);
 	VkResult createTextureSampler();
-	void createTextureImageView();
+	void createTextureImageView(Image& imageInOut);
+	void initStaticDataTextures();
 	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect);
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 	VkResult createCommandPool();
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 	VkFormat findDepthFormat();
-	//bool hasStencilComponent(VkFormat format) const;
 	void createDepthResources();
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
-
 
 	void updateStorageBuffers(uint32 imageIndex);
 
 	bool isEnoughInstanceSpace(const std::string& typeName)
 	{
-		uint32 counter = primitiveCounter[typeName];
+		uint32 counter = primitiveCounterInitData[typeName];
 		return instancedPrimitiveMeshes[typeName].size() < counter;
 	}
 	
@@ -193,8 +214,6 @@ public:
 	void cleanupSwapChain();
 	void recreateSwapChain();
 
-	void drawFrame();
-
 	void updatePushConstants(const LG::LGraphicsComponent& mesh);
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
@@ -249,7 +268,7 @@ public:
 	VkInstance instance;
 
 	int32 majorApiVersion = 1;
-	int32 minorApiVersion = 1;
+	int32 minorApiVersion = 2;
 	
 	VkDebugUtilsMessengerEXT debugMessenger;
 	
@@ -270,11 +289,9 @@ public:
 	std::vector<VkImageView> swapChainImageViews;
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 
-	VkImage textureImage;
-	VmaAllocation textureImageMemory;
-	VkImageView textureImageView;
 	VkSampler textureSampler;
 
+	// TODO: should be packed to the Image I guess
 	std::vector<VkImage> depthImages;
 	std::vector<VmaAllocation> depthImagesMemory;
 	std::vector<VkImageView> depthImagesView;
@@ -320,7 +337,8 @@ public:
 	ObjectDataBuffer stagingBuffer;
 	void* stagingBufferPtr;
 
-	std::unordered_map<std::string, uint32> primitiveCounter;
+	std::unordered_map<std::string, uint32> primitiveCounterInitData;
+	std::unordered_map<std::string, uint32> texturesInitData;
 
 	glm::mat4 projection;
 	
@@ -338,10 +356,11 @@ public:
 	glm::mat4 projView;
 
 	bool bNeedToUpdateProjView = false;
+
+	std::unordered_map<std::string, Image> images;
 	
 	// TODO: doesn't work properly
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
-
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
 	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> instancedPrimitiveMeshes;
 };
@@ -385,8 +404,6 @@ protected:
 		auto object = graphicsComponent.lock();
 
 		// TODO: it worth to implement UE FName alternative to save some memory
-		//const_cast<std::string&>(object->typeName) = std::string(typeid(decltype (t)).name());
-		const_cast<uint32&>(object->indicesCount) = object->getIndexBuffer().size();
 		if (LRenderer* renderer = LRenderer::get())
 		{
 			auto resCounter = objectsCounter.emplace(object->getTypeName(), 0);

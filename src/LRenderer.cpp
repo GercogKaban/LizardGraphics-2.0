@@ -11,15 +11,14 @@
 #define GLFW_INCLUDE_VULKAN
 #include <glfw3.h>
 
-//#define TRACY_ENABLE
 #include <tracy/Tracy.hpp>
-
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 
 #include "LWindow.h"
 #include "vulkan/vulkan.h"
 
+//temporary
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 #include "Util.h"
 
 #include "gen_shaders.cxx"
@@ -33,8 +32,8 @@ bool LRenderer::bFramebufferResized = false;
 std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
 std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
-LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, std::unordered_map<std::string, uint32> primitiveCounter)
-    :primitiveCounter(primitiveCounter)
+LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData)
+    :primitiveCounterInitData(initData.primitiveCounter)
 {
     if (thisPtr)
     {
@@ -45,7 +44,17 @@ LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, std::unordered_map<
     
     this->window = window.get()->getWindow();
     specs = window.get()->getWindowSpecs();
-    
+
+    texturesInitData.reserve(initData.textures.size());
+
+    {
+        uint32 textureId = 0;
+        for (const auto& texture : initData.textures)
+        {
+            texturesInitData[texture] = textureId++;
+        }
+    }
+
     glfwSetWindowUserPointer(this->window, this);
     glfwSetFramebufferSizeCallback(this->window, framebufferResizeCallback);
 	init();
@@ -91,8 +100,8 @@ void LRenderer::init()
     HANDLE_VK_ERROR(createCommandPool())
     createDepthResources();
     HANDLE_VK_ERROR(createFramebuffers())
-    HANDLE_VK_ERROR(createTextureImage())
-    createTextureImageView();
+
+    initStaticDataTextures();
     HANDLE_VK_ERROR(createTextureSampler())
 
     createInstancesStorageBuffers();
@@ -108,17 +117,12 @@ void LRenderer::cleanup()
     cleanupSwapChain();
 
     vkDestroySampler(logicalDevice, textureSampler, nullptr);
-    vkDestroyImageView(logicalDevice, textureImageView, nullptr);
-    vkDestroyImage(logicalDevice, textureImage, nullptr);
 
-    for (int32 i = 0; i < swapChainImages.size(); ++i)
+    for (auto& [_, image] : images)
     {
-        vkDestroyImageView(logicalDevice, depthImagesView[i], nullptr);
-        vkDestroyImage(logicalDevice, depthImages[i], nullptr);
-        vmaFreeMemory(allocator, depthImagesMemory[i]);
+        vkDestroyImageView(logicalDevice, image.imageView, nullptr);
+        vmaDestroyImage(allocator, image.image, image.allocation);
     }
-
-    vmaFreeMemory(allocator, textureImageMemory);
 
     vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
@@ -401,7 +405,7 @@ VkResult LRenderer::createDescriptorSetLayout()
 
     VkDescriptorSetLayoutBinding samplerLayoutBinding{};
     samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorCount = texturesInitData.size();
     samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     samplerLayoutBinding.pImmutableSamplers = nullptr;
     samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -605,7 +609,48 @@ VkResult LRenderer::createFramebuffers()
     return VK_SUCCESS;
 }
 
-VkResult LRenderer::createImage(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory)
+VkResult LRenderer::createImage(const std::string& texturePath, Image& imageOut)
+{
+    stbi_set_flip_vertically_on_load(true);
+
+    int texWidth, texHeight, texChannels;
+
+    if (stbi_uc* pixels = stbi_load(texturePath.data(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha))
+    {
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+        VkBuffer stagingBuffer;
+        VmaAllocation stagingBufferMemory;
+
+        void* data;
+        // stage buffer to copy from CPU to GPU
+        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO, stagingBuffer, stagingBufferMemory, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+
+        vmaMapMemory(allocator, stagingBufferMemory, &data);
+        memcpy(data, pixels, static_cast<uint64>(imageSize));
+        stbi_image_free(pixels);
+
+        HANDLE_VK_ERROR(createImageInternal(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            imageOut.image, imageOut.allocation))
+
+        transitionImageLayout(imageOut.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+        copyBufferToImage(stagingBuffer, imageOut.image, static_cast<uint32>(texWidth), static_cast<uint32>(texHeight));
+        transitionImageLayout(imageOut.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+
+        vmaUnmapMemory(allocator, stagingBufferMemory);
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingBufferMemory);
+
+        createTextureImageView(imageOut);
+        return VK_SUCCESS;
+    }
+    else
+    {
+        RAISE_VK_ERROR("failed to load texture image!");
+    }
+}
+
+VkResult LRenderer::createImageInternal(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory)
 {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -629,43 +674,13 @@ VkResult LRenderer::createImage(uint32 width, uint32 height, VkFormat format, Vk
     return vmaCreateImage(allocator, &imageInfo, &createInfo, &image, &imageMemory, &allocInfo);
 }
 
-VkResult LRenderer::createTextureImage()
+VkResult LRenderer::loadTextureImage(const std::string& texturePath)
 {
-    stbi_set_flip_vertically_on_load(true);
-
-    int texWidth, texHeight, texChannels;
-
-    if (stbi_uc* pixels = stbi_load("textures/smile.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha))
+    if (images.find(texturePath) == images.end())
     {
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-        VkBuffer stagingBuffer;
-        VmaAllocation stagingBufferMemory;
-
-        void* data;
-        // stage buffer to copy from CPU to GPU
-        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO, stagingBuffer, stagingBufferMemory, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-
-        vmaMapMemory(allocator, stagingBufferMemory, &data);
-        memcpy(data, pixels, static_cast<uint64>(imageSize));
-        stbi_image_free(pixels);
-
-        HANDLE_VK_ERROR(createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, 
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
-            textureImage, textureImageMemory))
-
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-        copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32>(texWidth), static_cast<uint32>(texHeight));
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-
-        vmaUnmapMemory(allocator, stagingBufferMemory);
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingBufferMemory);
-
-        return VK_SUCCESS;
-    }
-    else
-    {
-        RAISE_VK_ERROR("failed to load texture image!");
+        Image imageToCreate{};
+        HANDLE_VK_ERROR(createImage(texturePath, imageToCreate))
+        images.emplace(texturePath, imageToCreate);
     }
 }
 
@@ -691,9 +706,17 @@ VkResult LRenderer::createTextureSampler()
     return vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &textureSampler);
 }
 
-void LRenderer::createTextureImageView()
+void LRenderer::createTextureImageView(Image& imageInOut)
 {
-    textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    imageInOut.imageView = createImageView(imageInOut.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
+void LRenderer::initStaticDataTextures()
+{
+    for (const auto& [path,_] : texturesInitData)
+    {
+        loadTextureImage(path);
+    }
 }
 
 void LRenderer::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect)
@@ -843,7 +866,7 @@ void LRenderer::createDepthResources()
     VkFormat depthFormat = findDepthFormat();
     for (int32 i = 0; i < swapChainImages.size(); ++i)
     {
-        createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImages[i], depthImagesMemory[i]);
+        createImageInternal(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImages[i], depthImagesMemory[i]);
         depthImagesView[i] = createImageView(depthImages[i], depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 }
@@ -900,7 +923,11 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
         {
             if (auto objectPtr = primitives[i].lock())
             {
-                PushConstants data{ projView * objectPtr->getModelMatrix() };
+                PushConstants data
+                { 
+                    .mvpMatrix = projView * objectPtr->getModelMatrix(), 
+                    .textureId = texturesInitData[objectPtr->getColorTexturePath()]
+                };
                 memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
             }
             else
@@ -927,7 +954,11 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
                     for (size_t i = startIdx; i < endIdx; ++i) {
                         if (auto objectPtr = primitives[i].lock()) 
                         {
-                            PushConstants data { projView * objectPtr->getModelMatrix() };
+                            PushConstants data
+                            {
+                                .mvpMatrix = projView * objectPtr->getModelMatrix(),
+                                .textureId = texturesInitData[objectPtr->getColorTexturePath()]
+                            };
                             memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
                         } 
                         else 
@@ -1049,14 +1080,14 @@ void LRenderer::createInstancesStorageBuffers()
      createBuffer(globalBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO, stagingBuffer.buffer, stagingBuffer.memory, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
      vmaMapMemory(allocator, stagingBuffer.memory, &stagingBufferPtr);
 
-     uint64 instancedArraysSize = primitiveCounter.size();
+     uint64 instancedArraysSize = primitiveCounterInitData.size();
 
      primitivesData.resize(instancedArraysSize * maxFramesInFlight);
 
      for (uint32 i = 0; i < maxFramesInFlight; ++i)
      {
          int32 instancedArrayNum = 0;
-         for (const auto& [_, primitivesNum] : primitiveCounter)
+         for (const auto& [_, primitivesNum] : primitiveCounterInitData)
          {
              int32 index = i * instancedArraysSize + instancedArrayNum;
              auto bufferSize = sizeof(PushConstants) * primitivesNum;
@@ -1065,7 +1096,7 @@ void LRenderer::createInstancesStorageBuffers()
          }
      }
 
-     for (const auto& [primitiveName, primitivesNum] : primitiveCounter)
+     for (const auto& [primitiveName, primitivesNum] : primitiveCounterInitData)
      {
          std::vector<uint32> indices(primitivesNum);
          std::iota(indices.begin(), indices.end(), 0);
@@ -1075,16 +1106,16 @@ void LRenderer::createInstancesStorageBuffers()
 
 uint32 LRenderer::findProperStageBufferSize() const
 {
-    uint32 maxPrimitiveCounter = 0;
-    for (const auto& [_, counter] : primitiveCounter)
+    uint32 maxprimitiveCounterInitData = 0;
+    for (const auto& [_, counter] : primitiveCounterInitData)
     {
         uint32 primitivesNum = counter;
-        if (primitivesNum > maxPrimitiveCounter)
+        if (primitivesNum > maxprimitiveCounterInitData)
         {
-            maxPrimitiveCounter = primitivesNum;
+            maxprimitiveCounterInitData = primitivesNum;
         }
     }
-    return maxPrimitiveCounter * sizeof(PushConstants);
+    return maxprimitiveCounterInitData * sizeof(PushConstants);
 }
 
 void LRenderer::vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData)
@@ -1135,26 +1166,26 @@ VkResult LRenderer::createDescriptorPool()
 {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size();
+    poolSizes[0].descriptorCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounterInitData.size();
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size();
+    poolSizes[1].descriptorCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounterInitData.size() * texturesInitData.size();
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size();
+    poolInfo.maxSets = static_cast<uint32>(maxFramesInFlight) * primitiveCounterInitData.size();
 
     return vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &descriptorPool);
 }
 
 VkResult LRenderer::createDescriptorSets()
 {
-     std::vector<VkDescriptorSetLayout> layouts(static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size(), descriptorSetLayout);
+     std::vector<VkDescriptorSetLayout> layouts(static_cast<uint32>(maxFramesInFlight) * primitiveCounterInitData.size(), descriptorSetLayout);
      VkDescriptorSetAllocateInfo allocInfo{};
      allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
      allocInfo.descriptorPool = descriptorPool;
-     allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounter.size();
+     allocInfo.descriptorSetCount = static_cast<uint32>(maxFramesInFlight) * primitiveCounterInitData.size();
      allocInfo.pSetLayouts = layouts.data();
     
      descriptorSets.resize(allocInfo.descriptorSetCount);
@@ -1163,24 +1194,31 @@ VkResult LRenderer::createDescriptorSets()
      for (uint32 i = 0; i < maxFramesInFlight; ++i)
      {
          uint32 instancedArrayNum = 0;
-         for (auto it = primitiveCounter.begin(); it != primitiveCounter.end(); ++it)
+         for (auto it = primitiveCounterInitData.begin(); it != primitiveCounterInitData.end(); ++it)
          {
              auto& [_, primitivesNum] = *it;
 
              VkDescriptorBufferInfo bufferInfo{};
-             bufferInfo.buffer = primitivesData[i * primitiveCounter.size() + instancedArrayNum].buffer;
+             bufferInfo.buffer = primitivesData[i * primitiveCounterInitData.size() + instancedArrayNum].buffer;
              bufferInfo.offset = 0;
              bufferInfo.range = sizeof(PushConstants) * primitivesNum;
 
-             VkDescriptorImageInfo imageInfo{};
-             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-             imageInfo.imageView = textureImageView;
-             imageInfo.sampler = textureSampler;
+             std::vector<VkDescriptorImageInfo> imageDescriptors;
+             imageDescriptors.reserve(images.size());
+
+             for (auto& [_, image] : images)
+             {
+                 VkDescriptorImageInfo imageInfo{};
+                 imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                 imageInfo.imageView = image.imageView;
+                 imageInfo.sampler = textureSampler;
+                 imageDescriptors.push_back(imageInfo);
+             }
 
              std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
              descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-             descriptorWrites[0].dstSet = descriptorSets[i * primitiveCounter.size() + instancedArrayNum];
+             descriptorWrites[0].dstSet = descriptorSets[i * primitiveCounterInitData.size() + instancedArrayNum];
              descriptorWrites[0].dstBinding = 0;
              descriptorWrites[0].dstArrayElement = 0;
              descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -1188,18 +1226,19 @@ VkResult LRenderer::createDescriptorSets()
              descriptorWrites[0].pBufferInfo = &bufferInfo;
 
              descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-             descriptorWrites[1].dstSet = descriptorSets[i * primitiveCounter.size() + instancedArrayNum];
+             descriptorWrites[1].dstSet = descriptorSets[i * primitiveCounterInitData.size() + instancedArrayNum];
              descriptorWrites[1].dstBinding = 1;
              descriptorWrites[1].dstArrayElement = 0;
              descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-             descriptorWrites[1].descriptorCount = 1;
-             descriptorWrites[1].pImageInfo = &imageInfo;
+             descriptorWrites[1].descriptorCount = imageDescriptors.size();
+             descriptorWrites[1].pImageInfo = imageDescriptors.data();
 
              vkUpdateDescriptorSets(logicalDevice, static_cast<uint32>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
              ++instancedArrayNum;
          }
      }
-    return VK_SUCCESS;
+
+     return VK_SUCCESS;
 }
 
 VkResult LRenderer::createSyncObjects()
@@ -1304,7 +1343,7 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
 
                     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
                     vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-                    vkCmdDrawIndexed(commandBuffer, mesh.indicesCount, 1, 0, 0, 0);
+                    vkCmdDrawIndexed(commandBuffer, mesh.getIndicesCount(), 1, 0, 0, 0);
                 }
                 else
                 {
@@ -1347,6 +1386,13 @@ void LRenderer::cleanupSwapChain()
         vkDestroyImageView(logicalDevice, swapChainImageViews[i], nullptr);
     }
 
+    for (int32 i = 0; i < swapChainImages.size(); ++i)
+    {
+        vkDestroyImageView(logicalDevice, depthImagesView[i], nullptr);
+        vkDestroyImage(logicalDevice, depthImages[i], nullptr);
+        vmaFreeMemory(allocator, depthImagesMemory[i]);
+    }
+
     vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
 }
 
@@ -1367,6 +1413,7 @@ void LRenderer::recreateSwapChain()
     
     createSwapChain();
     createImageViews();
+    createDepthResources();
     createFramebuffers();
 
     initProjection();
@@ -1374,6 +1421,11 @@ void LRenderer::recreateSwapChain()
 
 void LRenderer::drawFrame()
 {
+    if (bNeedToUpdateProjView)
+    {
+        updateProjView();
+    }
+
     vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
     uint32 imageIndex;
 
@@ -1446,6 +1498,11 @@ void LRenderer::drawFrame()
     }
 
     currentFrame = (currentFrame + 1) % maxFramesInFlight;
+}
+
+void LRenderer::exit()
+{
+    vkDeviceWaitIdle(logicalDevice);
 }
 
 void LRenderer::updatePushConstants(const LG::LGraphicsComponent& mesh)

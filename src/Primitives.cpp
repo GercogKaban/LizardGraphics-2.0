@@ -1,6 +1,8 @@
-﻿#include "pch.h"
-#include "Primitives.h"
+﻿#include "Primitives.h"
+#include "pch.h"
 #include "LRenderer.h"
+
+std::set<std::string> LG::LGraphicsComponent::textures;
 
 const std::vector<LG::LGraphicsComponent::Vertex> LG::verticesPlane =
 {
@@ -53,6 +55,12 @@ const std::vector<uint16_t> LG::indicesCube =
     // Bottom face
     12, 13, 1, 1, 0, 12
 };
+
+void LG::LGraphicsComponent::setColorTexture(std::string&& path)
+{
+    textures.insert(path);
+    texturePath = path;
+}
 
 LG::LGraphicsComponent::LGraphicsComponent()
 {

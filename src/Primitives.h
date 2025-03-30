@@ -13,11 +13,6 @@
 
 namespace LG
 {
-    class LDummy
-    {
-
-    };
-
     class LGraphicsComponent
     {
         LGraphicsComponent(const LGraphicsComponent&) = delete;
@@ -64,30 +59,56 @@ namespace LG
             return attributeDescriptions;
         }
 
-        virtual const std::vector<Vertex>& getVertexBuffer() const
+        uint32 getIndicesCount() const
         {
-            static std::vector<Vertex> dummy;
-            return dummy;
+            assert(indices);
+            return static_cast<uint32>(indices->size());
+        }
+
+        uint32 getVerticesCount() const
+        {
+            assert(vertices);
+            return static_cast<uint32>(vertices->size());
+        }
+
+        const std::vector<Vertex>& getVertexBuffer() const
+        {
+            assert(vertices);
+            return *vertices;
         };
 
-        virtual const std::vector<uint16>& getIndexBuffer() const
+        const std::vector<uint16>& getIndexBuffer() const
         {
-            static std::vector<uint16> dummy;
-            return dummy;
+            assert(indices);
+            return *indices;
         };
 
         const std::string& getTypeName()
         {
             return typeName;
         }
+
+        static const std::set<std::string>& getInitTexturesData() { return textures; }
+
+        const std::string& getColorTexturePath() const { return texturePath;}
+        void setColorTexture(std::string&& path);
         
         LGraphicsComponent();
         virtual ~LGraphicsComponent();
 
-        std::function<glm::mat4x4 ()> getModelMatrix = [](){ return glm::mat4x4(1); };;
+        const std::function<glm::mat4x4()> getModelMatrix = [](){ return glm::mat4x4(1); };
         
+    protected:
+
+        const std::vector<LG::LGraphicsComponent::Vertex>* vertices = nullptr;
+        const std::vector<uint16>* indices = nullptr;
+
+        // TODO: should be changed to hash/index storage to reduce memory usage
         std::string typeName;
-        uint32 indicesCount = 0;
+        std::string texturePath;
+
+        // TODO: temporal desicion
+        static std::set<std::string> textures;
     };
 
     extern const std::vector<LG::LGraphicsComponent::Vertex> verticesCube;
@@ -101,16 +122,8 @@ namespace LG
         LCube()
         {
             typeName = std::string("LCube");
-        }
-
-        virtual const std::vector<Vertex>& getVertexBuffer() const override
-        {
-            return verticesCube;
-        }
-
-        virtual const std::vector<uint16>& getIndexBuffer() const override
-        {
-            return indicesCube;
+            vertices = &verticesCube;
+            indices = &indicesCube;
         }
     };
 
@@ -125,16 +138,8 @@ namespace LG
         LPlane()
         {
             typeName = std::string("LPlane");
-        }
-
-        virtual const std::vector<Vertex>& getVertexBuffer() const override
-        {
-            return verticesPlane;
-        }
-
-        virtual const std::vector<uint16>& getIndexBuffer() const override
-        {
-            return indicesPlane;
+            vertices = &verticesPlane;
+            indices = &indicesPlane;
         }
     };
 
