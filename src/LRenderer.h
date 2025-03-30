@@ -344,7 +344,7 @@ protected:
 	
     float degrees = 80.0f;
     float zNear = 0.1f;
-	float zFar = 100.0f;
+	float zFar = 1000.0f;
 
 	glm::vec3 cameraPosition = glm::vec3(0.0f, 0.0f, 3.0f);
 	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
