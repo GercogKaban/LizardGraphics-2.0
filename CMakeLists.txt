@@ -58,4 +58,5 @@ target_compile_features(LizardGraphics PRIVATE cxx_std_20)
 
 
 add_subdirectory(tracy-profiler)
-add_compile_definitions(TRACY_ENABLE TRACY_ON_DEMAND)
+add_compile_definitions(TRACY_ENABLE)
+add_compile_definitions(TRACY_ON_DEMAND)
