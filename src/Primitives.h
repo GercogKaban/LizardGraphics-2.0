@@ -90,7 +90,7 @@ namespace LG
 
         static const std::set<std::string>& getInitTexturesData() { return textures; }
 
-        const std::string& getColorTexturePath() const { return texturePath;}
+        virtual std::string getColorTexturePath() const { return texturePath;}
         void setColorTexture(std::string&& path);
         
         LGraphicsComponent();
@@ -143,18 +143,47 @@ namespace LG
         }
     };
 
+    class LPortal : public LPlane
+    {
+        friend class LRenderer;
+
+    public:
+
+        LPortal()
+        {
+            portalIndex = ++portalCounter;
+            std::string textureName = std::format("portal{}", portalIndex);
+            setColorTexture(std::move(textureName));
+            typeName = std::string("LPortal");
+        }
+
+        const glm::mat4& getPortalView() const { return view; }
+        void setPortalView(const glm::mat4& view);
+        bool needsRecalculation() const { return bNeedRecalculation; }
+        virtual std::string getColorTexturePath() const override
+        {
+            return std::format("portal{}", portalIndex);
+        }
+
+    protected:
+
+        glm::mat4 view = glm::mat4(1.0f);
+        bool bNeedRecalculation = true;
+        uint32 portalIndex;
+
+        static uint32 portalCounter;
+    };
+
     template<typename Component>
     bool isInstancePrimitive(Component* ptr)
     {
-        if (dynamic_cast<LG::LCube*>(ptr))
-        {
-            return true;
-        }
-        else if (dynamic_cast<LG::LPlane*>(ptr))
-        {
-            return true;
-        }
-        return false;
+        return dynamic_cast<LG::LCube*>(ptr) || dynamic_cast<LG::LPlane*>(ptr);
+    }
+
+    template<typename Component>
+    bool isPortal(Component* ptr)
+    {
+        return dynamic_cast<LG::LPortal*>(ptr);
     }
 
 }

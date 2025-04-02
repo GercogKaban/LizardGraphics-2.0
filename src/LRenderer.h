@@ -28,10 +28,14 @@ class LRenderer
 	
 public:
 
+
+	glm::mat4 playerModel;
+
 	struct StaticInitData
 	{
 		std::unordered_map<std::string, uint32> primitiveCounter;
 		std::set<std::string> textures;
+		uint32 maxPortalNum = 0;
 	};
 	
 	struct VkMemoryBuffer
@@ -42,13 +46,19 @@ public:
 
 	struct PushConstants
 	{
-		glm::mat4 mvpMatrix;
+		glm::mat4 genericMatrix;
+		glm::mat4 view;
+	};
+
+	struct SSBOData
+	{
+		glm::mat4 genericMatrix;
 
 		uint32 textureId = 0;
-		uint32 reserved1 = 0;
+		uint32 isPortal = 0;
 		uint32 reserved2 = 0;
 		uint32 reserved3 = 0;
-	} pushConstants;
+	};
 
 	struct GraphicsPipelineParams
 	{
@@ -63,6 +73,47 @@ public:
 		VmaAllocation allocation;
 		uint32 mipLevels;
 	};
+
+	struct RenderTarget
+	{
+		RenderTarget(VkDevice logicalDevice, VmaAllocator allocator):
+			logicalDevice(logicalDevice), allocator(allocator){}
+		~RenderTarget();
+
+		void clear(bool bClearImages = false);
+
+		std::vector<Image> images;
+		std::vector<Image> depthImages;
+		std::vector<VkFramebuffer> framebuffers;
+
+	protected:
+
+		VkDevice logicalDevice;
+		VmaAllocator allocator;
+	};
+
+	class RenderPass
+	{
+	public:
+
+		RenderPass(VkDevice logicalDevice, VkFormat colorFormat, VkFormat depthFormat, bool bToPresent);
+		virtual ~RenderPass();
+
+		void beginPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, const VkExtent2D& size);
+		//virtual void render() = 0;
+		void endPass(VkCommandBuffer commandBuffer);
+
+		VkRenderPass getRenderPass() const { return renderPass; }
+
+	protected:
+
+		void init(VkFormat colorFormat, VkFormat depthFormat);
+		void clear();
+
+		VkRenderPass renderPass;
+		VkDevice logicalDevice;
+		bool bToPresent;
+	};
 	
 	LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData);
 	~LRenderer();
@@ -72,17 +123,57 @@ public:
 
 	GLFWwindow* getWindow() { return window; }
 
-	void setProjection(float degrees, float zNear = 0.1f, float zFar = 100.0f);
+	void setProjection(float degrees, float width, float height, float zNear = 0.1f, float zFar = 100.0f);
+
 	void setView(const glm::mat4& view);
 
 	glm::vec3 getCameraUp() const;
 	glm::vec3 getCameraFront() const;
 	glm::vec3 getCameraPosition() const;
 
+	glm::mat4 computeExitPortalView(
+		const glm::vec3& playerPos,
+		const glm::vec3& enterPos, const glm::vec3& enterNormal,
+		const glm::vec3& exitPos, const glm::vec3& exitNormal
+	);
+
 	void setCameraFront(const glm::vec3& cameraFront);
 	void setCameraPosition(const glm::vec3& cameraPosition);
 
-	void drawFrame();
+	glm::vec3 getCameraPosition(const glm::mat4& viewMatrix) 
+	{
+		// Extract the rotation (upper-left 3x3) and translation (last column)
+		glm::mat3 rotation = glm::mat3(viewMatrix);
+		glm::vec3 translation = glm::vec3(viewMatrix[3]);
+
+		// Compute camera position
+		return -glm::transpose(rotation) * translation;
+	}
+
+	glm::vec3 getCameraForward(const glm::mat4& viewMatrix)
+	{
+		return -glm::vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+	}
+
+	glm::vec3 getCameraUp(const glm::mat4& viewMatrix)
+	{
+		return glm::vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+	}
+
+	glm::vec3 extractScale(const glm::mat4& modelMatrix) 
+	{
+		glm::vec3 scale;
+
+		// The length of each basis vector gives the scale factor
+		scale.x = glm::length(glm::vec3(modelMatrix[0])); // X-axis scale
+		scale.y = glm::length(glm::vec3(modelMatrix[1])); // Y-axis scale
+		scale.z = glm::length(glm::vec3(modelMatrix[2])); // Z-axis scale
+
+		return scale;
+	}
+
+
+	void drawFrame(float delta);
 	void exit();
 
 	static LRenderer* get()
@@ -96,6 +187,9 @@ protected:
 
 	void init();
 	void cleanup();
+
+	void doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, const std::unique_ptr<RenderPass>& portalPass, uint32 portal1Ind, uint32 portal2Ind);
+	void doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, bool bSwitchRenderPass = true);
 
 	bool checkValidationLayerSupport() const;
 	std::vector<const char*> getRequiredExtensions() const;
@@ -118,16 +212,16 @@ protected:
 	VkResult createAllocator();
 	VkResult createSurface();
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32 mipLevels);
-	VkResult createImageViews();
-	VkResult createRenderPass();
+	VkResult createPortalRenderTarget();
 	VkResult createDescriptorSetLayout();
-	VkResult createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut);
+	VkResult createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut, VkRenderPass renderPass);
 	VkShaderModule createShaderModule(const std::vector<uint8_t>& code);
-	VkResult createFramebuffers();
+	void createFramebuffers(RenderTarget* renderTarget, const VkExtent2D& size, uint32 framebuffersNum, VkRenderPass renderPass);
 	VkResult createImage(const std::string& texturePath, Image& imageOut);
 	VkResult createImageInternal(uint32 width, uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VmaAllocation& imageMemory, uint32 mipLevels);
 	VkResult loadTextureImage(const std::string& texturePath);
-	VkResult createTextureSampler(uint32 mipLevels);
+	void clearUndefinedImage(VkImage imageToClear);
+	VkResult createTextureSampler(VkSampler& samplerOut, uint32 mipLevels);
 	void createTextureImageView(Image& imageInOut, uint32 mipLevels);
 	void initStaticDataTextures();
 	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect, uint32 mipLevels);
@@ -136,16 +230,15 @@ protected:
 	VkResult createCommandPool();
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 	VkFormat findDepthFormat();
-	void createDepthResources();
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
 
 	void updateStorageBuffers(uint32 imageIndex);
 
-	bool isEnoughInstanceSpace(const std::string& typeName)
+	bool isEnoughStaticInstanceSpace(const std::string& typeName)
 	{
 		uint32 counter = primitiveCounterInitData[typeName];
-		return instancedPrimitiveMeshes[typeName].size() < counter;
+		return staticInstancedPrimitiveMeshes[typeName].size() < counter;
 	}
 	
 	void initProjection();
@@ -213,10 +306,9 @@ protected:
 	VkResult createSyncObjects();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageIndex);
 
-	void cleanupSwapChain();
 	void recreateSwapChain();
 
-	void updatePushConstants(const LG::LGraphicsComponent& mesh);
+	//void updatePushConstants(const LG::LGraphicsComponent& mesh);
 	
 	bool isDeviceSuitable(VkPhysicalDevice device) const;
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -253,8 +345,9 @@ protected:
 	void addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);
 	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
 
-	// properties
+	bool needPortalRecalculation() const;
 
+	// properties
 	LWindow::LWindowSpecs specs;
 	
 	const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
@@ -287,22 +380,29 @@ protected:
 	GLFWwindow* window;
 	VkFormat swapChainImageFormat;
 	VkExtent2D swapChainExtent;
-	std::vector<VkImage> swapChainImages;
-	std::vector<VkImageView> swapChainImageViews;
-	std::vector<VkFramebuffer> swapChainFramebuffers;
+
+	uint32 swapChainSize = 0;
+	uint32 portalSize = 0;
+
+	std::unique_ptr<RenderTarget> swapChainRt;
+	std::vector<std::unique_ptr<RenderTarget>> portalsRt;
 
 	std::unordered_map<uint32, VkSampler> textureSamplers;
 
-	// TODO: should be packed to the Image I guess
-	std::vector<VkImage> depthImages;
-	std::vector<VmaAllocation> depthImagesMemory;
-	std::vector<VkImageView> depthImagesView;
+	// TODO: need to be cleared
+	VkSampler portalSampler;
 
 	VkPipeline graphicsPipelineInstanced;
 	VkPipeline graphicsPipelineRegular;
 	VkPipeline debugGraphicsPipeline;
 
-	VkRenderPass renderPass;
+	// TODO: need to be cleared
+	VkPipeline graphicsPipelineInstancedPortal;
+	VkPipeline graphicsPipelineRegularPortal;
+
+	std::unique_ptr<RenderPass> mainPass;
+	std::vector<std::unique_ptr<RenderPass>> portalPasses;
+
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorPool descriptorPool;
 	std::vector<VkDescriptorSet> descriptorSets;
@@ -341,6 +441,7 @@ protected:
 
 	std::unordered_map<std::string, uint32> primitiveCounterInitData;
 	std::unordered_map<std::string, uint32> texturesInitData;
+	uint32 maxPortalNum;
 
 	glm::mat4 projection;
 	
@@ -352,6 +453,8 @@ protected:
 	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 	
+	glm::mat4 storedProj;
+	glm::mat4 storedView;
 	glm::mat4 view;
 
 	// precalculated
@@ -364,7 +467,12 @@ protected:
 	// TODO: doesn't work properly
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
-	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> instancedPrimitiveMeshes;
+	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> staticInstancedPrimitiveMeshes;
+	std::unordered_map<uint32, bool> updatedStorageBuffer;
+
+	std::vector<std::weak_ptr<LG::LPortal>> portals;
+
+	float delta;
 };
 
 class RenderComponentBuilder

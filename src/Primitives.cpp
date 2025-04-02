@@ -3,6 +3,7 @@
 #include "LRenderer.h"
 
 std::set<std::string> LG::LGraphicsComponent::textures;
+uint32 LG::LPortal::portalCounter = 0;
 
 const std::vector<LG::LGraphicsComponent::Vertex> LG::verticesPlane =
 {
@@ -75,4 +76,10 @@ LG::LGraphicsComponent::LGraphicsComponent()
 LG::LGraphicsComponent::~LGraphicsComponent()
 {
     ::RenderComponentBuilder::destruct(this);
+}
+
+void LG::LPortal::setPortalView(const glm::mat4& view)
+{
+    this->view = view;
+    bNeedRecalculation = true;
 }
