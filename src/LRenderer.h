@@ -11,6 +11,10 @@
 #include <string>
 #include <set>
 
+#include <glm/vec3.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/mat4x4.hpp>
+
 #include "LWindow.h"
 #include "Primitives.h"
 
@@ -30,6 +34,7 @@ public:
 
 
 	glm::mat4 playerModel;
+	glm::quat playerRotation;
 
 	struct StaticInitData
 	{
@@ -139,26 +144,6 @@ public:
 
 	void setCameraFront(const glm::vec3& cameraFront);
 	void setCameraPosition(const glm::vec3& cameraPosition);
-
-	glm::vec3 getCameraPosition(const glm::mat4& viewMatrix) 
-	{
-		// Extract the rotation (upper-left 3x3) and translation (last column)
-		glm::mat3 rotation = glm::mat3(viewMatrix);
-		glm::vec3 translation = glm::vec3(viewMatrix[3]);
-
-		// Compute camera position
-		return -glm::transpose(rotation) * translation;
-	}
-
-	glm::vec3 getCameraForward(const glm::mat4& viewMatrix)
-	{
-		return -glm::vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
-	}
-
-	glm::vec3 getCameraUp(const glm::mat4& viewMatrix)
-	{
-		return glm::vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
-	}
 
 	glm::vec3 extractScale(const glm::mat4& modelMatrix) 
 	{

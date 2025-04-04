@@ -236,114 +236,74 @@ glm::mat4 LRenderer::computeExitPortalView(
     );
 }
 
+bool equal(float a, float b, float epsilon = 1e-6)
+{
+    return std::fabs(a - b) < epsilon;
+}
+
+glm::vec3 extractCameraPosition(const glm::mat4& viewMatrix)
+{
+    // Extract the rotation (upper-left 3x3) and translation (last column)
+    glm::mat3 rotation = glm::mat3(viewMatrix);
+    glm::vec3 translation = glm::vec3(viewMatrix[3]);
+
+    // Compute camera position
+    return -glm::transpose(rotation) * translation;
+}
+
+glm::vec3 extractCameraForward(const glm::mat4& viewMatrix)
+{
+    return -glm::vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+}
+
+glm::vec3 extractCameraUp(const glm::mat4& viewMatrix)
+{
+    return glm::vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+}
+
+glm::mat4 viewWorldToLocal(const glm::mat4& view)
+{
+    glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 res = glm::lookAt(position, position + glm::vec3(0.0f,0.0f,1.0f), up);
+
+    auto oldCameraPos = extractCameraPosition(view);
+    auto newCameraPos = extractCameraPosition(res);
+
+    //res = glm::rotate(res, glm::radians(180.0f), up);
+    
+    assert(equal(newCameraPos.x, 0.0f), equal(newCameraPos.y, 0.0f), equal(newCameraPos.z, 0.0f));
+    return res;
+}
+
 void LRenderer::doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, 
     const std::unique_ptr<RenderPass>& portalPass, uint32 portal1Ind, uint32 portal2Ind)
 {
-    std::shared_ptr<LG::LPortal> portalPtr1 = portals[portal1Ind].lock();
-    std::shared_ptr<LG::LPortal> portalPtr2 = portals[portal2Ind].lock();
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
 
-    {
-        //glm::vec3 playerUp = getCameraUp(storedView);
-        //glm::vec3 playerForward = getCameraForward(storedView);
-        glm::vec3 playerPos = getCameraPosition(storedView);
+    std::shared_ptr<LG::LPortal> portalIn = portals[portal1Ind].lock();
+    std::shared_ptr<LG::LPortal> portalOut = portals[portal2Ind].lock();
 
-        glm::vec3 upA = getCameraUp(portalPtr1->view);
-        glm::vec3 forwardA = getCameraForward(portalPtr1->view);
-        glm::vec3 posA = getCameraPosition(portalPtr1->view);
+    glm::mat4 portalInMat = portalIn->getModelMatrix();
+    glm::mat4 portalOutMat = portalOut->getModelMatrix();
 
-        glm::vec3 upB = getCameraUp(portalPtr2->view);
-        glm::vec3 forwardB = getCameraForward(portalPtr2->view);
-        glm::vec3 posB = getCameraPosition(portalPtr2->view);
+    //auto test = extractCameraPosition(storedView);
 
-        //glm::vec3 playerToPortal = posA - playerPos;
+    glm::mat4 playerRelativeToPortalIn = glm::inverse(portalInMat) * playerModel;
+    glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), { 0.0f,0.0f,1.0f });
+    glm::mat4 rotatedRelativeToPortalIn = rotationMatrix * playerRelativeToPortalIn;
 
-        //float angleRadians = glm::acos(glm::dot(forwardA, -playerToPortal) / (glm::length(forwardA) * glm::length(playerToPortal)));
-        //auto cross = glm::cross(forwardA, -playerToPortal);
+    glm::mat4 playerWorldFromPortalOut = portalOutMat * rotatedRelativeToPortalIn;
 
-        //float sign = cross.y > 0.0f ? 1.0f : -1.0f;
-        //sign = std::abs(cross.y) < 0.000001f ? 0.0f : sign;
-        
-        //if (cross.y < 0.0f)
-        //{
-        //    float angleDegrees = glm::degrees(angleRadians);
-        //    angleRadians = -angleRadians;
-        //}
-        //else
-        //{
-        //    float angleDegrees = glm::degrees(angleRadians);
-        //    angleRadians = angleRadians;
-        //}
+    glm::mat4 virtualView = glm::inverse(playerWorldFromPortalOut);
+    setView(virtualView);
 
-        //glm::vec3 rightA = glm::cross(forwardA, upA);
-        //glm::vec3 portalRightDir = rightA - posA;
-        //glm::vec3 portalToPlayer = playerPos - posA;
+    //setProjection(degrees, scales.x, scales.z, zNear, zFar);
 
-        //float angleRadians = glm::acos(glm::dot(portalRightDir, portalToPlayer) / (glm::length(portalRightDir) * glm::length(portalToPlayer)));
-        //float angleDegrees = glm::degrees(angleRadians);
-
-        //assert(angleDegrees > 0.0f);
-        
-        //glm::vec3 cross = glm::cross(portalDir, portalToPlayer);
-        //float sign = glm::dot(cross, upA);
-        //float angleDegrees = glm::degrees(angleRadians);
-        //if (sign > 0.0f)
-        //{
-        //   angleRadians = -angleRadians;
-        //}
-
-
- 
-        // animated rotation
-        //const float degreesInSecond = 10.0f;
-        //static float rotationDegree = 0.0f;
-        //static float rotationSign = -1.0f;
-
-        //if (std::abs(rotationDegree) > 90.0f)
-        //{
-        //    rotationSign = -rotationSign;
-        //} 
-        //rotationDegree += rotationSign * degreesInSecond * delta;
-
-        //glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(rotationDegree), glm::vec3(0, 1, 0));
-
-        //glm::vec3 rotatedForwardB = rotationMatrix * glm::vec4(forwardB, 1.0f);
-        //rotatedForwardB.z += 0.5f;
-
-        //glm::mat4 virtualView = glm::lookAt(posB, posB + rotatedForwardB, upB
-
-        
-        glm::mat4 m = portalPtr2->getModelMatrix() * glm::inverse(portalPtr1->getModelMatrix()) * playerModel;
-
-        //getCameraPosition();
-        //getCameraForward();
-        //getCameraUp();
-
-        glm::vec3 newPosition = glm::vec3(m[3]); // Extract translation from matrix
-        glm::vec3 newUp = glm::vec3(m[1]); // Up direction
-        glm::vec3 newForward = -glm::vec3(m[2]); // Forward direction (negated for LookAt)
-
-        glm::mat4 virtualView = glm::lookAt(
-            newPosition,             // Camera position
-            newPosition + newForward, // Look-at target
-            newUp                    // Up vector
-        );
-
-        setView(virtualView);
-
-        
-        
-        auto scales = extractScale(portalPtr2->getModelMatrix());
-        setProjection(degrees, 3, 3, zNear, zFar);
-
-        updateProjView();
-        portalPass->beginPass(commandBuffer, framebuffer, swapChainExtent);
-        doMainPass(commandBuffer, framebuffer, false);
-        portalPass->endPass(commandBuffer);
-    }
-    //else
-    {
-        // TODO: should be erased
-    }
+    updateProjView();
+    portalPass->beginPass(commandBuffer, framebuffer, swapChainExtent);
+    doMainPass(commandBuffer, framebuffer, false);
+    portalPass->endPass(commandBuffer);
 }
 
 void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, bool bSwitchRenderPass)
