@@ -272,7 +272,7 @@ glm::mat4 viewWorldToLocal(const glm::mat4& view)
 
     //res = glm::rotate(res, glm::radians(180.0f), up);
     
-    assert(equal(newCameraPos.x, 0.0f), equal(newCameraPos.y, 0.0f), equal(newCameraPos.z, 0.0f));
+    assert(equal(newCameraPos.x, 0.0f) && equal(newCameraPos.y, 0.0f) && equal(newCameraPos.z, 0.0f));
     return res;
 }
 
