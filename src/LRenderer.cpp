@@ -1320,7 +1320,7 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
             size_t startIdx = t * chunkSize;
             size_t endIdx = (t == numThreads - 1) ? indices.size() : startIdx + chunkSize;
             
-            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx]() 
+            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx, bIsPortal]() 
                 {
                     for (size_t i = startIdx; i < endIdx; ++i) {
                         if (auto objectPtr = primitives[i].lock()) 
