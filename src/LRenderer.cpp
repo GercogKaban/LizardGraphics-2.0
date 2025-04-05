@@ -276,6 +276,22 @@ glm::mat4 viewWorldToLocal(const glm::mat4& view)
     return res;
 }
 
+glm::mat4 resetScale(const glm::mat4& matrix)
+{
+    glm::vec3 translation = glm::vec3(matrix[3]);
+    glm::mat3 rotation = glm::mat3(glm::normalize(glm::vec3(matrix[0])),
+        glm::normalize(glm::vec3(matrix[1])),
+        glm::normalize(glm::vec3(matrix[2])));
+
+    glm::mat4 newMatrix = glm::mat4(1.0f);
+    newMatrix[0] = glm::vec4(rotation[0], 0.0f);
+    newMatrix[1] = glm::vec4(rotation[1], 0.0f);
+    newMatrix[2] = glm::vec4(rotation[2], 0.0f);
+    newMatrix[3] = glm::vec4(translation, 1.0f);
+
+    return newMatrix;
+}
+
 void LRenderer::doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, 
     const std::unique_ptr<RenderPass>& portalPass, uint32 portal1Ind, uint32 portal2Ind)
 {
@@ -295,10 +311,10 @@ void LRenderer::doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer frameb
 
     glm::mat4 playerWorldFromPortalOut = portalOutMat * rotatedRelativeToPortalIn;
 
-    glm::mat4 virtualView = glm::inverse(playerWorldFromPortalOut);
-    setView(virtualView);
+    glm::mat4 cameraMatrixRelativeToPlayer = glm::mat4_cast(playerOrientation);
 
-    //setProjection(degrees, scales.x, scales.z, zNear, zFar);
+    glm::mat4 virtualView = glm::inverse(cameraMatrixRelativeToPlayer * resetScale(playerWorldFromPortalOut));
+    setView(virtualView);
 
     updateProjView();
     portalPass->beginPass(commandBuffer, framebuffer, swapChainExtent);
@@ -332,11 +348,9 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
                 auto indicesCount = primitives[0].lock()->getIndexBuffer().size();
                 auto instancesCount = primitives.size();
 
-                SSBOData projViewConstants =
+                PushConstants projViewConstants =
                 {
-                    .genericMatrix = projView,
-                    .textureId = 0,
-                    .isPortal = bIsPortal
+                    .genericMatrix = projView
                 };
 
                 vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
@@ -350,7 +364,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
             }
         };
 
-    auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
+    auto drawMeshes = [this, commandBuffer, bSwitchRenderPass](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
         {
             for (auto it = meshes.begin(); it != meshes.end(); ++it)
             {
@@ -361,7 +375,6 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
                     PushConstants projViewConstants =
                     {
                         .genericMatrix = projView * mesh.getModelMatrix(),
-                        .view = view
                     };
 
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
@@ -1338,7 +1351,7 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
 
         ++instancedArrayNum;
 
-        copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(PushConstants));
+        copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(SSBOData));
     }
 }
 
@@ -1457,7 +1470,7 @@ void LRenderer::createInstancesStorageBuffers()
          for (const auto& [_, primitivesNum] : primitiveCounterInitData)
          {
              int32 index = i * instancedArraysSize + instancedArrayNum;
-             auto bufferSize = sizeof(PushConstants) * primitivesNum;
+             auto bufferSize = sizeof(SSBOData) * primitivesNum;
              createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, primitivesData[index].buffer, primitivesData[index].memory);
              ++instancedArrayNum;
          }
@@ -1482,7 +1495,7 @@ uint32 LRenderer::findProperStageBufferSize() const
             maxprimitiveCounterInitData = primitivesNum;
         }
     }
-    return maxprimitiveCounterInitData * sizeof(PushConstants);
+    return maxprimitiveCounterInitData * sizeof(SSBOData);
 }
 
 void LRenderer::vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData)
@@ -1568,7 +1581,7 @@ VkResult LRenderer::createDescriptorSets()
              VkDescriptorBufferInfo bufferInfo{};
              bufferInfo.buffer = primitivesData[i * primitiveCounterInitData.size() + instancedArrayNum].buffer;
              bufferInfo.offset = 0;
-             bufferInfo.range = sizeof(PushConstants) * primitivesNum;
+             bufferInfo.range = sizeof(SSBOData) * primitivesNum;
 
              std::vector<VkDescriptorImageInfo> imageDescriptors;
              imageDescriptors.resize(texturesInitData.size());
@@ -1687,13 +1700,9 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
         {
             storedView = view;
             storedProj = projection;
-            for (uint32 i = 0; i < portalsRt.size(); ++i)
-            {
-                // TODO: I'm not sure if we can use currentFrame here
-                doPortalPass(commandBuffer, portalsRt[0]->framebuffers[currentFrame], portalPasses[0], 0, 1);
-                doPortalPass(commandBuffer, portalsRt[1]->framebuffers[currentFrame], portalPasses[1], 1, 0);
-                //++shit;
-            }
+
+            doPortalPass(commandBuffer, portalsRt[0]->framebuffers[currentFrame], portalPasses[0], 0, 1);
+            doPortalPass(commandBuffer, portalsRt[1]->framebuffers[currentFrame], portalPasses[1], 1, 0);
         }
     }
 

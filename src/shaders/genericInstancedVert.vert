@@ -12,7 +12,6 @@ struct SSBOEntry
 layout(push_constant) uniform UniformBufferObject 
 {
     mat4 projView;
-    mat4 view;
 } constants;
 
 layout (binding = 0) buffer SSBO
@@ -28,7 +27,6 @@ layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) flat out uint textureId;
 layout(location = 3) flat out uint isPortal;
-layout(location = 4) flat out mat4 view;
 
 void main() 
 {
@@ -37,5 +35,4 @@ void main()
     fragTexCoord = inTexCoord;
     textureId = ssbo.entries[gl_InstanceIndex].textureId;
     isPortal = ssbo.entries[gl_InstanceIndex].isPortal;
-    view = constants.view;
 }

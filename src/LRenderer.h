@@ -34,7 +34,7 @@ public:
 
 
 	glm::mat4 playerModel;
-	glm::quat playerRotation;
+	glm::quat playerOrientation;
 
 	struct StaticInitData
 	{
@@ -52,7 +52,6 @@ public:
 	struct PushConstants
 	{
 		glm::mat4 genericMatrix;
-		glm::mat4 view;
 	};
 
 	struct SSBOData
