@@ -340,28 +340,32 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
                 // TODO: actually here we should only ignore current portal
                 if (!bSwitchRenderPass && bIsPortal)
                 {
-                    continue;
+                    // just skip for now
                 }
 
-                const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
-                VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
-                VkDeviceSize offsets[] = { 0 };
-
-                auto indicesCount = primitives[0].lock()->getIndexBuffer().size();
-                auto instancesCount = primitives.size();
-
-                PushConstants projViewConstants =
+                else
                 {
-                    .genericMatrix = projView
-                };
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
+                    VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
+                    VkDeviceSize offsets[] = { 0 };
 
-                vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
+                    auto indicesCount = primitives[0].lock()->getIndexBuffer().size();
+                    auto instancesCount = primitives.size();
 
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * staticInstancedPrimitiveMeshes.size() + instanceArrayNum], 0, nullptr);
+                    PushConstants projViewConstants =
+                    {
+                        .genericMatrix = projView
+                    };
 
-                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-                vkCmdDrawIndexed(commandBuffer, indicesCount, instancesCount, 0, 0, 0);
+                    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
+
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * staticInstancedPrimitiveMeshes.size() + instanceArrayNum], 0, nullptr);
+
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                    vkCmdDrawIndexed(commandBuffer, indicesCount, instancesCount, 0, 0, 0);
+                }
+
                 ++instanceArrayNum;
             }
         };
