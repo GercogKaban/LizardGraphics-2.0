@@ -3,10 +3,10 @@
 layout(push_constant) uniform UniformBufferObject 
 {
     mat4 mvp;
-    ivec4 textureId_R_R_R;
-    ivec4 R_R_R_R1;
-    ivec4 R_R_R_R2;
-    ivec4 R_R_R_R3;
+    //ivec4 textureId_R_R_R;
+    //ivec4 R_R_R_R1;
+    //ivec4 R_R_R_R2;
+    //ivec4 R_R_R_R3;
 } constants;
 
 layout(location = 0) in vec3 inPosition;
@@ -23,6 +23,6 @@ void main()
     gl_Position = constants.mvp * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragTexCoord = inTexCoord;
-    textureId = constants.textureId_R_R_R.x;
+    textureId = 0; //constants.textureId_R_R_R.x;
     isPortal = 0;
 }

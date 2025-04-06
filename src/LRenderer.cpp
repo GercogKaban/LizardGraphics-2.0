@@ -716,7 +716,6 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
     dynamicState.dynamicStateCount = static_cast<uint32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
     
-
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
@@ -900,9 +899,12 @@ VkResult LRenderer::loadTextureImage(const std::string& texturePath)
         HANDLE_VK_ERROR(createImage(texturePath, imageToCreate))
         images.emplace(texturePath, imageToCreate);
 
-        VkSampler sampler;
-        createTextureSampler(sampler, imageToCreate.mipLevels);
-        textureSamplers[imageToCreate.mipLevels] = sampler;
+        if (textureSamplers.find(imageToCreate.mipLevels) == textureSamplers.end())
+        {
+            VkSampler sampler;
+            createTextureSampler(sampler, imageToCreate.mipLevels);
+            textureSamplers[imageToCreate.mipLevels] = sampler;
+        }
     }
 }
 
@@ -1293,8 +1295,7 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
         {
             if (auto objectPtr = primitives[i].lock())
             {
-                // TODO: temp debug
-                auto str = objectPtr->getColorTexturePath();
+                assert(!objectPtr->getColorTexturePath().empty() && "Please, make sure that you set up a color texture to your mesh");
                 SSBOData data =
                 {
                     .genericMatrix = objectPtr->getModelMatrix(),
@@ -1890,11 +1891,17 @@ VkResult LRenderer::createLogicalDevice()
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = VK_TRUE;
 
+    VkPhysicalDeviceVulkan12Features deviceFeatures12{};
+    deviceFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    deviceFeatures12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    deviceFeatures12.runtimeDescriptorArray = VK_TRUE;
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
+    createInfo.pNext = &deviceFeatures12;
     createInfo.enabledExtensionCount = static_cast<uint32>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
@@ -2289,12 +2296,12 @@ void LRenderer::RenderPass::init(VkFormat colorFormat, VkFormat depthFormat)
     colorAttachment.format = colorFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.storeOp = bToPresent? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.finalLayout = bToPresent? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = depthFormat;
