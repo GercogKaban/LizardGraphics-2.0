@@ -143,6 +143,9 @@ public:
 
 	void setCameraFront(const glm::vec3& cameraFront);
 	void setCameraPosition(const glm::vec3& cameraPosition);
+	inline void setCameraPositionToPlayer(const glm::vec3& cameraPosition) {
+		cameraPositionToPlayer = cameraPosition;
+	}
 
 	glm::vec3 extractScale(const glm::mat4& modelMatrix) 
 	{
@@ -433,6 +436,7 @@ protected:
     float zNear = 0.1f;
 	float zFar = 1000.0f;
 
+	glm::vec3 cameraPositionToPlayer = glm::vec3(0.0f, 0.0f, 0.0f);
 	glm::vec3 cameraPosition = glm::vec3(0.0f, 0.0f, 3.0f);
 	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);

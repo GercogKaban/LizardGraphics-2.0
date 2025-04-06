@@ -311,7 +311,9 @@ void LRenderer::doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer frameb
 
     glm::mat4 playerWorldFromPortalOut = portalOutMat * rotatedRelativeToPortalIn;
 
-    glm::mat4 cameraMatrixRelativeToPlayer = glm::mat4_cast(playerOrientation);
+    glm::mat4 cameraMatrixRelativeToPlayer = glm::mat4(1.0f);
+    cameraMatrixRelativeToPlayer = glm::translate(cameraMatrixRelativeToPlayer, cameraPositionToPlayer);
+    cameraMatrixRelativeToPlayer *= glm::mat4_cast(playerOrientation);
 
     glm::mat4 virtualView = glm::inverse(resetScale(playerWorldFromPortalOut) * cameraMatrixRelativeToPlayer);
     setView(virtualView);

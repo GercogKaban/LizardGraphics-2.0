@@ -17,7 +17,7 @@ void main()
     if (isPortal == 1)
     {
         newCoords.x = gl_FragCoord.x / 1920;
-        newCoords.y = gl_FragCoord.y / 1061;
+        newCoords.y = gl_FragCoord.y / 1080;
     }
 
     outColor = texture(texSampler[nonuniformEXT(textureId)], newCoords);
