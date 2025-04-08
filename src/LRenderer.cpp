@@ -303,8 +303,6 @@ void LRenderer::doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer frameb
     glm::mat4 portalInMat = portalIn->getModelMatrix();
     glm::mat4 portalOutMat = portalOut->getModelMatrix();
 
-    //auto test = extractCameraPosition(storedView);
-
     glm::mat4 playerRelativeToPortalIn = glm::inverse(portalInMat) * playerModel;
     glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), { 0.0f,0.0f,1.0f });
     glm::mat4 rotatedRelativeToPortalIn = rotationMatrix * playerRelativeToPortalIn;
@@ -334,7 +332,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
     auto drawStaticInstancedMeshes = [this, commandBuffer, bSwitchRenderPass]()
         {
             uint32 instanceArrayNum = 0;
-            for (const auto& [typeName, primitives] : staticInstancedPrimitiveMeshes)
+            for (const auto& [typeName, primitives] : staticPreloadedInstancedMeshes)
             {
                 bool bIsPortal = typeName == "LPortal";
                 // TODO: actually here we should only ignore current portal
@@ -354,12 +352,14 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
 
                     PushConstants projViewConstants =
                     {
-                        .genericMatrix = projView
+                        .genericMatrix = projView,
+                        .width = static_cast<float>(swapChainExtent.width),
+                        .height = static_cast<float>(swapChainExtent.height),
                     };
 
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
 
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * staticInstancedPrimitiveMeshes.size() + instanceArrayNum], 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * staticPreloadedInstancedMeshes.size() + instanceArrayNum], 0, nullptr);
 
                     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
                     vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
@@ -381,6 +381,8 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
                     PushConstants projViewConstants =
                     {
                         .genericMatrix = projView * mesh.getModelMatrix(),
+                        .width = static_cast<float>(swapChainExtent.width),
+                        .height = static_cast<float>(swapChainExtent.height),
                     };
 
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
@@ -964,8 +966,8 @@ void LRenderer::clearUndefinedImage(VkImage imageToClear)
 
     vkCmdPipelineBarrier(
         commandBuffer,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         0,
         0, nullptr,
         0, nullptr,
@@ -1281,16 +1283,16 @@ void LRenderer::endSingleTimeCommands(VkCommandBuffer commandBuffer)
     vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
 }
 
-void LRenderer::updateStorageBuffers(uint32 imageIndex)
+void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
 {
     ZoneScoped;
-    uint64 instancedArraysSize = staticInstancedPrimitiveMeshes.size();
+    uint64 instancedArraysSize = staticPreloadedInstancedMeshes.size();
 
     int32 instancedArrayNum = 0;
-    for (const auto& [primitiveName, primitives] : staticInstancedPrimitiveMeshes)
+    for (const auto& [primitiveName, primitives] : staticPreloadedInstancedMeshes)
     {
         // buffer array
-        VkBuffer bufferToCopy = primitivesData[imageIndex * instancedArraysSize + instancedArrayNum].buffer;
+        VkBuffer bufferToCopy = primitivesData[instancedArrayNum].buffer;
         const auto& indices = primitiveDataIndices[primitiveName];
         bool bIsPortal = primitiveName == "LPortal";
 
@@ -1375,13 +1377,11 @@ void LRenderer::setProjection(float degrees, float width, float height, float zN
     glm::mat4 proj = glm::perspective(glm::radians(degrees), width / height, zNear, zFar);
     proj[1][1] *= -1;
     projection = proj;
-    bNeedToUpdateProjView = true;
 }
 
 void LRenderer::setView(const glm::mat4& viewIn)
 {
     view = viewIn;
-    bNeedToUpdateProjView = true;
 }
 
 glm::vec3 LRenderer::getCameraUp() const
@@ -1425,7 +1425,6 @@ void LRenderer::initView()
 void LRenderer::updateProjView()
 {
     projView = projection * view;
-    bNeedToUpdateProjView = false;
 }
 
 void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties,
@@ -1469,14 +1468,14 @@ void LRenderer::createInstancesStorageBuffers()
 
      uint64 instancedArraysSize = primitiveCounterInitData.size();
 
-     primitivesData.resize(instancedArraysSize * maxFramesInFlight);
+     primitivesData.resize(instancedArraysSize /** maxFramesInFlight*/);
 
-     for (uint32 i = 0; i < maxFramesInFlight; ++i)
+     //for (uint32 i = 0; i < maxFramesInFlight; ++i)
      {
-         int32 instancedArrayNum = 0;
+         uint32 instancedArrayNum = 0;
          for (const auto& [_, primitivesNum] : primitiveCounterInitData)
          {
-             int32 index = i * instancedArraysSize + instancedArrayNum;
+             uint32 index = /*instancedArraysSize +*/ instancedArrayNum;
              auto bufferSize = sizeof(SSBOData) * primitivesNum;
              createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, primitivesData[index].buffer, primitivesData[index].memory);
              ++instancedArrayNum;
@@ -1586,7 +1585,7 @@ VkResult LRenderer::createDescriptorSets()
              auto& [_, primitivesNum] = *it;
 
              VkDescriptorBufferInfo bufferInfo{};
-             bufferInfo.buffer = primitivesData[i * primitiveCounterInitData.size() + instancedArrayNum].buffer;
+             bufferInfo.buffer = primitivesData[instancedArrayNum].buffer;
              bufferInfo.offset = 0;
              bufferInfo.range = sizeof(SSBOData) * primitivesNum;
 
@@ -1668,6 +1667,12 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
 {
     ZoneScoped;
 
+    //if (!bUpdatedStaticStorageBuffer)
+    {
+        updateStaticStorageBuffer();
+        bUpdatedStaticStorageBuffer = true;
+    }
+
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0; // Optional
@@ -1689,34 +1694,21 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    if (!updatedStorageBuffer[currentFrame])
-    {
-        updateStorageBuffers(currentFrame);
-        updatedStorageBuffer[currentFrame] = true;
-    }
-
     //glm::mat4 savedView = getView();
 
     // TODO: Ideally these pass calls should be incapsulated inside RenderPass->render(), but there is some work to do...
     {
         ZoneScopedN("Portal passes");
 
-        // TODO: temp check
-        //static uint32 shit = 0;
-        //if (shit < portalsRt.size() * maxFramesInFlight/*needPortalRecalculation()*/)
-        {
-            storedView = view;
-            storedProj = projection;
+        storedView = view;
 
-            doPortalPass(commandBuffer, portalsRt[0]->framebuffers[currentFrame], portalPasses[0], 0, 1);
-            doPortalPass(commandBuffer, portalsRt[1]->framebuffers[currentFrame], portalPasses[1], 1, 0);
-        }
+        doPortalPass(commandBuffer, portalsRt[0]->framebuffers[currentFrame], portalPasses[0], 0, 1);
+        doPortalPass(commandBuffer, portalsRt[1]->framebuffers[currentFrame], portalPasses[1], 1, 0);
     }
 
     {
         ZoneScopedN("Main pass");
         view = storedView;
-        projection = storedProj;
         updateProjView();
         doMainPass(commandBuffer, swapChainRt->framebuffers[imageIndex]);
     }
@@ -2201,12 +2193,12 @@ void LRenderer::addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
         if (LG::isPortal(sharedPtr.get()))
         {
             portals.emplace_back(std::reinterpret_pointer_cast<LG::LPortal>(sharedPtr));
-            auto& staticInstancesArray = staticInstancedPrimitiveMeshes[typeName];
+            auto& staticInstancesArray = staticPreloadedInstancedMeshes[typeName];
             staticInstancesArray.emplace_back(ptr);
         }
         else if (isEnoughStaticInstanceSpace(typeName) && LG::isInstancePrimitive(sharedPtr.get()))
         {
-            auto& staticInstancesArray = staticInstancedPrimitiveMeshes[typeName];
+            auto& staticInstancesArray = staticPreloadedInstancedMeshes[typeName];
             staticInstancesArray.emplace_back(ptr);
         }
         else
@@ -2342,9 +2334,9 @@ void LRenderer::RenderPass::init(VkFormat colorFormat, VkFormat depthFormat)
     VkSubpassDependency depthDependency{};
     depthDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     depthDependency.dstSubpass = 0;
-    depthDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    depthDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     depthDependency.srcAccessMask = 0;
-    depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
     std::array<VkSubpassDependency, 2> dependencies = { dependency, depthDependency };

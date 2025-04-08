@@ -52,6 +52,10 @@ public:
 	struct PushConstants
 	{
 		glm::mat4 genericMatrix;
+		float width;
+		float height;
+		float reserved1;
+		float reserved2;
 	};
 
 	struct SSBOData
@@ -220,12 +224,12 @@ protected:
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
 
-	void updateStorageBuffers(uint32 imageIndex);
+	void updateStaticStorageBuffer(/*uint32 imageIndex*/);
 
 	bool isEnoughStaticInstanceSpace(const std::string& typeName)
 	{
 		uint32 counter = primitiveCounterInitData[typeName];
-		return staticInstancedPrimitiveMeshes[typeName].size() < counter;
+		return staticPreloadedInstancedMeshes[typeName].size() < counter;
 	}
 	
 	void initProjection();
@@ -441,22 +445,21 @@ protected:
 	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 	
-	glm::mat4 storedProj;
 	glm::mat4 storedView;
 	glm::mat4 view;
 
 	// precalculated
 	glm::mat4 projView;
 
-	bool bNeedToUpdateProjView = false;
-
 	std::unordered_map<std::string, Image> images;
 	
 	// TODO: doesn't work properly
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
-	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> staticInstancedPrimitiveMeshes;
-	std::unordered_map<uint32, bool> updatedStorageBuffer;
+	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> staticPreloadedInstancedMeshes;
+	
+	bool bUpdatedStaticStorageBuffer = false;
+	//std::unordered_map<uint32, bool> updatedStorageBuffer;
 
 	std::vector<std::weak_ptr<LG::LPortal>> portals;
 
