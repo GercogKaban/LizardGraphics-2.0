@@ -33,7 +33,7 @@ std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
 std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
 LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData)
-    :primitiveCounterInitData(initData.primitiveCounter)
+    :primitiveCounterInitData(initData.primitiveCounter), maxPortalNum(initData.maxPortalNum)
 {
     if (thisPtr)
     {
@@ -79,17 +79,18 @@ void LRenderer::init()
     initProjection();
     initView();
     
-    HANDLE_VK_ERROR(createImageViews())
-    HANDLE_VK_ERROR(createRenderPass())
+    mainPass = std::make_unique<RenderPass>(logicalDevice, swapChainImageFormat, findDepthFormat(), true);
     HANDLE_VK_ERROR(createDescriptorSetLayout())
 
     GraphicsPipelineParams mainPipelineParams;
     mainPipelineParams.bInstanced = true;
     mainPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_FILL;
-    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineInstanced))
+
+
+    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineInstanced, mainPass->getRenderPass()))
 
     mainPipelineParams.bInstanced = false;
-    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineRegular))
+    HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineRegular, mainPass->getRenderPass()))
 
         //DEBUG_CODE(
         //    GraphicsPipelineParams debugPipelineParams;
@@ -98,11 +99,32 @@ void LRenderer::init()
         //)
 
     HANDLE_VK_ERROR(createCommandPool())
-    createDepthResources();
-    HANDLE_VK_ERROR(createFramebuffers())
+
+    createFramebuffers(swapChainRt.get(), swapChainExtent, swapChainSize, mainPass->getRenderPass());
+
+    for (uint32 i = 0; i < maxPortalNum; ++i)
+    {
+        auto portalPass = std::make_unique<RenderPass>(logicalDevice, swapChainImageFormat, findDepthFormat(), false);
+        HANDLE_VK_ERROR(createPortalRenderTarget())
+
+        GraphicsPipelineParams mainPipelineParams;
+        mainPipelineParams.bInstanced = true;
+        mainPipelineParams.polygonMode = VkPolygonMode::VK_POLYGON_MODE_FILL;
+        HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineInstancedPortal, portalPass->getRenderPass()))
+
+        mainPipelineParams.bInstanced = false;
+        HANDLE_VK_ERROR(createGraphicsPipeline(mainPipelineParams, graphicsPipelineRegularPortal, portalPass->getRenderPass()))
+        createFramebuffers(portalsRt[i].get(), swapChainExtent, maxFramesInFlight, portalPass->getRenderPass());
+
+        portalPasses.emplace_back(std::move(portalPass));
+    }
+
+    if (maxPortalNum > 0)
+    {
+        createTextureSampler(portalSampler, 0);
+    }
 
     initStaticDataTextures();
-
     createInstancesStorageBuffers();
 
     HANDLE_VK_ERROR(createDescriptorPool())
@@ -113,7 +135,12 @@ void LRenderer::init()
 
 void LRenderer::cleanup()
 {
-    cleanupSwapChain();
+    swapChainRt.reset();
+
+    for (auto& portalRt : portalsRt)
+    {
+        portalRt.reset();
+    }
 
     for (auto& [_, sampler] : textureSamplers)
     {
@@ -136,7 +163,13 @@ void LRenderer::cleanup()
     vkDestroyPipeline(logicalDevice, graphicsPipelineInstanced, nullptr);
     vkDestroyPipeline(logicalDevice, graphicsPipelineRegular, nullptr);
     vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-    vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
+
+    mainPass.reset();
+
+    for (auto& portalPass : portalPasses)
+    {
+        portalPass.reset();
+    }
     
     for (uint32 i = 0; i < maxFramesInFlight; ++i)
     {
@@ -159,6 +192,237 @@ void LRenderer::cleanup()
     vkDestroyDevice(logicalDevice, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
+}
+
+glm::mat4 LRenderer::computeExitPortalView(
+    const glm::vec3& playerPos,
+    const glm::vec3& enterPos, const glm::vec3& enterNormal,
+    const glm::vec3& exitPos, const glm::vec3& exitNormal
+) {
+    // Compute basis vectors for enter portal
+    glm::vec3 enterRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), enterNormal));
+    glm::vec3 enterUp = glm::normalize(glm::cross(enterNormal, enterRight));
+
+    // Compute basis vectors for exit portal
+    glm::vec3 exitRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), exitNormal));
+    glm::vec3 exitUp = glm::normalize(glm::cross(exitNormal, exitRight));
+
+    // Create transformation matrices for both portals
+    glm::mat4 enterTransform = glm::mat4(1.0f);
+    enterTransform[0] = glm::vec4(enterRight, 0.0f);
+    enterTransform[1] = glm::vec4(enterUp, 0.0f);
+    enterTransform[2] = glm::vec4(enterNormal, 0.0f);
+    enterTransform[3] = glm::vec4(enterPos, 1.0f);
+
+    glm::mat4 exitTransform = glm::mat4(1.0f);
+    exitTransform[0] = glm::vec4(exitRight, 0.0f);
+    exitTransform[1] = glm::vec4(exitUp, 0.0f);
+    exitTransform[2] = glm::vec4(exitNormal, 0.0f);
+    exitTransform[3] = glm::vec4(exitPos, 1.0f);
+
+    // Transform player position to exit portal space
+    glm::mat4 enterToExit = exitTransform * glm::inverse(enterTransform);
+    glm::vec4 transformedPos = enterToExit * glm::vec4(playerPos, 1.0f);
+
+    // Compute player's forward direction in portal space
+    glm::vec3 forward = glm::normalize(playerPos - enterPos);
+    glm::vec4 transformedForward = enterToExit * glm::vec4(forward, 0.0f);
+
+    // Compute the new camera view matrix
+    return glm::lookAt(
+        glm::vec3(transformedPos),  // New camera position
+        glm::vec3(transformedPos) + glm::vec3(transformedForward),  // Look direction
+        glm::vec3(exitUp)  // Up vector
+    );
+}
+
+bool equal(float a, float b, float epsilon = 1e-6)
+{
+    return std::fabs(a - b) < epsilon;
+}
+
+glm::vec3 extractCameraPosition(const glm::mat4& viewMatrix)
+{
+    // Extract the rotation (upper-left 3x3) and translation (last column)
+    glm::mat3 rotation = glm::mat3(viewMatrix);
+    glm::vec3 translation = glm::vec3(viewMatrix[3]);
+
+    // Compute camera position
+    return -glm::transpose(rotation) * translation;
+}
+
+glm::vec3 extractCameraForward(const glm::mat4& viewMatrix)
+{
+    return -glm::vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+}
+
+glm::vec3 extractCameraUp(const glm::mat4& viewMatrix)
+{
+    return glm::vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+}
+
+glm::mat4 viewWorldToLocal(const glm::mat4& view)
+{
+    glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 res = glm::lookAt(position, position + glm::vec3(0.0f,0.0f,1.0f), up);
+
+    auto oldCameraPos = extractCameraPosition(view);
+    auto newCameraPos = extractCameraPosition(res);
+
+    //res = glm::rotate(res, glm::radians(180.0f), up);
+    
+    assert(equal(newCameraPos.x, 0.0f) && equal(newCameraPos.y, 0.0f) && equal(newCameraPos.z, 0.0f));
+    return res;
+}
+
+glm::mat4 resetScale(const glm::mat4& matrix)
+{
+    glm::vec3 translation = glm::vec3(matrix[3]);
+    glm::mat3 rotation = glm::mat3(glm::normalize(glm::vec3(matrix[0])),
+        glm::normalize(glm::vec3(matrix[1])),
+        glm::normalize(glm::vec3(matrix[2])));
+
+    glm::mat4 newMatrix = glm::mat4(1.0f);
+    newMatrix[0] = glm::vec4(rotation[0], 0.0f);
+    newMatrix[1] = glm::vec4(rotation[1], 0.0f);
+    newMatrix[2] = glm::vec4(rotation[2], 0.0f);
+    newMatrix[3] = glm::vec4(translation, 1.0f);
+
+    return newMatrix;
+}
+
+void LRenderer::doPortalPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, 
+    const std::unique_ptr<RenderPass>& portalPass, uint32 portal1Ind, uint32 portal2Ind)
+{
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    std::shared_ptr<LG::LPortal> portalIn = portals[portal1Ind].lock();
+    std::shared_ptr<LG::LPortal> portalOut = portals[portal2Ind].lock();
+
+    glm::mat4 portalInMat = portalIn->getModelMatrix();
+    glm::mat4 portalOutMat = portalOut->getModelMatrix();
+
+    glm::mat4 playerRelativeToPortalIn = glm::inverse(portalInMat) * playerModel;
+    glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), { 0.0f,0.0f,1.0f });
+    glm::mat4 rotatedRelativeToPortalIn = rotationMatrix * playerRelativeToPortalIn;
+
+    glm::mat4 playerWorldFromPortalOut = portalOutMat * rotatedRelativeToPortalIn;
+
+    glm::mat4 cameraMatrixRelativeToPlayer = glm::mat4(1.0f);
+    cameraMatrixRelativeToPlayer = glm::translate(cameraMatrixRelativeToPlayer, cameraPositionToPlayer);
+    cameraMatrixRelativeToPlayer *= glm::mat4_cast(playerOrientation);
+
+    glm::mat4 virtualView = glm::inverse(resetScale(playerWorldFromPortalOut) * cameraMatrixRelativeToPlayer);
+    setView(virtualView);
+
+    updateProjView();
+    portalPass->beginPass(commandBuffer, framebuffer, swapChainExtent);
+    doMainPass(commandBuffer, framebuffer, false);
+    portalPass->endPass(commandBuffer);
+}
+
+void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, bool bSwitchRenderPass)
+{
+    // TODO: Ideally this thing should be incapsulated inside RenderPass->render(), but there is some work to do...
+    if (bSwitchRenderPass)
+    {
+        mainPass->beginPass(commandBuffer, framebuffer, swapChainExtent);
+    }
+    auto drawStaticInstancedMeshes = [this, commandBuffer, bSwitchRenderPass]()
+        {
+            uint32 instanceArrayNum = 0;
+            for (const auto& [typeName, primitives] : staticPreloadedInstancedMeshes)
+            {
+                bool bIsPortal = typeName == "LPortal";
+                // TODO: actually here we should only ignore current portal
+                if (!bSwitchRenderPass && bIsPortal)
+                {
+                    // just skip for now
+                }
+
+                else
+                {
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
+                    VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
+                    VkDeviceSize offsets[] = { 0 };
+
+                    auto indicesCount = primitives[0].lock()->getIndexBuffer().size();
+                    auto instancesCount = primitives.size();
+
+                    PushConstants projViewConstants =
+                    {
+                        .genericMatrix = projView,
+                        .width = static_cast<float>(swapChainExtent.width),
+                        .height = static_cast<float>(swapChainExtent.height),
+                    };
+
+                    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
+
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * staticPreloadedInstancedMeshes.size() + instanceArrayNum], 0, nullptr);
+
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                    vkCmdDrawIndexed(commandBuffer, indicesCount, instancesCount, 0, 0, 0);
+                }
+
+                ++instanceArrayNum;
+            }
+        };
+
+    auto drawMeshes = [this, commandBuffer, bSwitchRenderPass](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
+        {
+            for (auto it = meshes.begin(); it != meshes.end(); ++it)
+            {
+                if (!it->expired())
+                {
+                    LG::LGraphicsComponent& mesh = *it->lock();
+
+                    PushConstants projViewConstants =
+                    {
+                        .genericMatrix = projView * mesh.getModelMatrix(),
+                        .width = static_cast<float>(swapChainExtent.width),
+                        .height = static_cast<float>(swapChainExtent.height),
+                    };
+
+                    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
+
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getTypeName());
+                    VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
+                    VkDeviceSize offsets[] = { 0 };
+
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                    vkCmdDrawIndexed(commandBuffer, mesh.getIndicesCount(), 1, 0, 0, 0);
+                }
+                else
+                {
+                    it = meshes.erase(it);
+                }
+            }
+        };
+
+    {
+        ZoneScopedN("Instance pass");
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineInstanced);
+        drawStaticInstancedMeshes();
+    }
+
+    {
+        ZoneScopedN("Regular pass");
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineRegular);
+        drawMeshes(primitiveMeshes);
+    }
+
+    //DEBUG_CODE(
+    //    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, debugGraphicsPipeline);
+    //    drawMeshes(debugMeshes);
+    //          )
+
+    if (bSwitchRenderPass)
+    {
+        mainPass->endPass(commandBuffer);
+    }
 }
 
 bool LRenderer::checkValidationLayerSupport() const
@@ -319,82 +583,25 @@ VkImageView LRenderer::createImageView(VkImage image, VkFormat format, VkImageAs
     return imageView;
 }
 
-VkResult LRenderer::createImageViews()
+VkResult LRenderer::createPortalRenderTarget()
 {
-    swapChainImageViews.resize(swapChainImages.size());
+    auto portalRt = std::make_unique<RenderTarget>(logicalDevice, allocator);
+    portalRt->images.resize(maxFramesInFlight);
 
-    for (uint32 i = 0; i < swapChainImages.size(); ++i) 
+    for (uint32 i = 0; i < maxFramesInFlight; ++i)
     {
-        swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+        HANDLE_VK_ERROR(createImageInternal(swapChainExtent.width, swapChainExtent.height, swapChainImageFormat, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            portalRt->images[i].image, portalRt->images[i].allocation, 1))
+
+        clearUndefinedImage(portalRt->images[i].image);
+
+        portalRt->images[i].imageView = createImageView(portalRt->images[i].image, swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     }
+
+    portalsRt.emplace_back(std::move(portalRt));
     return VK_SUCCESS;
-}
-
-VkResult LRenderer::createRenderPass()
-{
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = swapChainImageFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = findDepthFormat();
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    VkSubpassDependency depthDependency{};
-    depthDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    depthDependency.dstSubpass = 0;
-    depthDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    depthDependency.srcAccessMask = 0;
-    depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    std::array<VkSubpassDependency, 2> dependencies = { dependency, depthDependency};
-    std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
-
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = static_cast<uint32>(dependencies.size());
-    renderPassInfo.pDependencies = dependencies.data();
-
-    return vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass);
 }
 
 VkResult LRenderer::createDescriptorSetLayout()
@@ -421,7 +628,7 @@ VkResult LRenderer::createDescriptorSetLayout()
     return vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &descriptorSetLayout);
 }
 
-VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut)
+VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params, VkPipeline& graphicsPipelineOut, VkRenderPass renderPass)
 {
     VkShaderModule vertShaderModule = params.bInstanced? createShaderModule(genericInstancedVert) : createShaderModule(genericVert);
     VkShaderModule fragShaderModule = createShaderModule(genericFrag);
@@ -515,10 +722,9 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
     dynamicState.dynamicStateCount = static_cast<uint32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
     
-
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1; // Optional
+    pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
 
     VkPushConstantRange pushConstantRange = {};
@@ -545,7 +751,6 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
     depthStencil.front = {}; // Optional
     depthStencil.back = {}; // Optional
 
-
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;
@@ -564,7 +769,6 @@ VkResult LRenderer::createGraphicsPipeline(const GraphicsPipelineParams& params,
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = nullptr; // Optional
     pipelineInfo.basePipelineIndex = -1;
-
 
     HANDLE_VK_ERROR(vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipelineOut))
 
@@ -586,15 +790,25 @@ VkShaderModule LRenderer::createShaderModule(const std::vector<uint8_t>& code)
     return shaderModule;
 }
 
-VkResult LRenderer::createFramebuffers()
-{
-    swapChainFramebuffers.resize(swapChainImageViews.size());
-    for (uint32 i = 0; i < swapChainImageViews.size(); ++i)
+void LRenderer::createFramebuffers(RenderTarget* renderTarget, const VkExtent2D& size, uint32 framebuffersNum, VkRenderPass renderPass)
+{ 
+    renderTarget->depthImages.resize(framebuffersNum);
+
+    VkFormat depthFormat = findDepthFormat();
+    for (int32 i = 0; i < framebuffersNum; ++i)
+    {
+        createImageInternal(size.width, size.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, renderTarget->depthImages[i].image, renderTarget->depthImages[i].allocation, 1);
+        renderTarget->depthImages[i].imageView = createImageView(renderTarget->depthImages[i].image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+    }
+
+    renderTarget->framebuffers.resize(framebuffersNum);
+    for (uint32 i = 0; i < framebuffersNum; ++i)
     {
         std::array<VkImageView, 2> attachments = 
         {
-            swapChainImageViews[i],
-            depthImagesView[i]
+            renderTarget->images[i].imageView,
+            renderTarget->depthImages[i].imageView
         };
 
         VkFramebufferCreateInfo framebufferInfo{};
@@ -602,13 +816,12 @@ VkResult LRenderer::createFramebuffers()
         framebufferInfo.renderPass = renderPass;
         framebufferInfo.attachmentCount = static_cast<uint32>(attachments.size());
         framebufferInfo.pAttachments = attachments.data();
-        framebufferInfo.width = swapChainExtent.width;
-        framebufferInfo.height = swapChainExtent.height;
+        framebufferInfo.width = size.width;
+        framebufferInfo.height = size.height;
         framebufferInfo.layers = 1;
 
-        HANDLE_VK_ERROR(vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &swapChainFramebuffers[i]))
+        HANDLE_VK_ERROR(vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &renderTarget->framebuffers[i]))
     }
-    return VK_SUCCESS;
 }
 
 VkResult LRenderer::createImage(const std::string& texturePath, Image& imageOut)
@@ -642,8 +855,8 @@ VkResult LRenderer::createImage(const std::string& texturePath, Image& imageOut)
         copyBufferToImage(stagingBuffer, imageOut.image, static_cast<uint32>(texWidth), static_cast<uint32>(texHeight));
 
         // TODO: should be pregenerated
-        generateMipmaps(imageOut.image, VK_FORMAT_R8G8B8A8_SRGB,    texWidth, texHeight, imageOut.mipLevels);
-        transitionImageLayout(imageOut.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, imageOut.mipLevels);
+        generateMipmaps(imageOut.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, imageOut.mipLevels);
+        //transitionImageLayout(imageOut.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, imageOut.mipLevels);
 
         vmaUnmapMemory(allocator, stagingBufferMemory);
         vmaDestroyBuffer(allocator, stagingBuffer, stagingBufferMemory);
@@ -653,7 +866,10 @@ VkResult LRenderer::createImage(const std::string& texturePath, Image& imageOut)
     }
     else
     {
-        RAISE_VK_ERROR("failed to load texture image!");
+        if (texturePath.find("portal") != 0)
+        {
+            RAISE_VK_ERROR("failed to load texture image!");
+        }
     }
 }
 
@@ -688,11 +904,80 @@ VkResult LRenderer::loadTextureImage(const std::string& texturePath)
         Image imageToCreate{};
         HANDLE_VK_ERROR(createImage(texturePath, imageToCreate))
         images.emplace(texturePath, imageToCreate);
-        createTextureSampler(imageToCreate.mipLevels);
+
+        if (textureSamplers.find(imageToCreate.mipLevels) == textureSamplers.end())
+        {
+            VkSampler sampler;
+            createTextureSampler(sampler, imageToCreate.mipLevels);
+            textureSamplers[imageToCreate.mipLevels] = sampler;
+        }
     }
 }
 
-VkResult LRenderer::createTextureSampler(uint32 mipLevels)
+void LRenderer::clearUndefinedImage(VkImage imageToClear)
+{
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = imageToClear;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    // 2. Clear the image with black color
+    VkClearColorValue clearColor = {};
+    clearColor.float32[0] = 0.0f;
+    clearColor.float32[1] = 0.0f;
+    clearColor.float32[2] = 0.0f;
+    clearColor.float32[3] = 1.0f;
+
+    vkCmdClearColorImage(
+        commandBuffer,
+        imageToClear,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        &clearColor,
+        1,
+        &barrier.subresourceRange
+    );
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    endSingleTimeCommands(commandBuffer);
+}
+
+VkResult LRenderer::createTextureSampler(VkSampler& samplerOut, uint32 mipLevels)
 {
     if (textureSamplers.find(mipLevels) == textureSamplers.end())
     {
@@ -713,7 +998,7 @@ VkResult LRenderer::createTextureSampler(uint32 mipLevels)
         samplerInfo.mipLodBias = 0.0f;
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = mipLevels;
-        return vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &textureSamplers[mipLevels]);
+        return vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &samplerOut);
     }
     return VK_SUCCESS;
 }
@@ -727,7 +1012,11 @@ void LRenderer::initStaticDataTextures()
 {
     for (const auto& [path,_] : texturesInitData)
     {
-        loadTextureImage(path);
+        // TODO: temporar check
+        if (path.find("portal") != 0)
+        {
+            loadTextureImage(path);
+        }
     }
 }
 
@@ -959,25 +1248,6 @@ VkFormat LRenderer::findDepthFormat()
     );
 }
 
-//bool LRenderer::hasStencilComponent(VkFormat format) const
-//{
-//    return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
-//}
-
-void LRenderer::createDepthResources()
-{
-    depthImages.resize(swapChainImages.size());
-    depthImagesMemory.resize(swapChainImages.size());
-    depthImagesView.resize(swapChainImages.size());
-
-    VkFormat depthFormat = findDepthFormat();
-    for (int32 i = 0; i < swapChainImages.size(); ++i)
-    {
-        createImageInternal(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImages[i], depthImagesMemory[i], 1);
-        depthImagesView[i] = createImageView(depthImages[i], depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-    }
-}
-
 VkCommandBuffer LRenderer::beginSingleTimeCommands()
 {
     VkCommandBufferAllocateInfo allocInfo{};
@@ -1013,29 +1283,32 @@ void LRenderer::endSingleTimeCommands(VkCommandBuffer commandBuffer)
     vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
 }
 
-void LRenderer::updateStorageBuffers(uint32 imageIndex)
+void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
 {
     ZoneScoped;
-    uint64 instancedArraysSize = instancedPrimitiveMeshes.size();
+    uint64 instancedArraysSize = staticPreloadedInstancedMeshes.size();
 
     int32 instancedArrayNum = 0;
-    for (const auto& [primitiveName, primitives] : instancedPrimitiveMeshes)
+    for (const auto& [primitiveName, primitives] : staticPreloadedInstancedMeshes)
     {
         // buffer array
-        VkBuffer bufferToCopy = primitivesData[imageIndex * instancedArraysSize + instancedArrayNum].buffer;
+        VkBuffer bufferToCopy = primitivesData[instancedArrayNum].buffer;
         const auto& indices = primitiveDataIndices[primitiveName];
+        bool bIsPortal = primitiveName == "LPortal";
 
 #if _MSC_VER
         std::for_each(std::execution::par_unseq, indices.begin(), indices.end(), [&](uint32 i)
         {
             if (auto objectPtr = primitives[i].lock())
             {
-                PushConstants data
-                { 
-                    .mvpMatrix = projView * objectPtr->getModelMatrix(), 
-                    .textureId = texturesInitData[objectPtr->getColorTexturePath()]
+                assert(!objectPtr->getColorTexturePath().empty() && "Please, make sure that you set up a color texture to your mesh");
+                SSBOData data =
+                {
+                    .genericMatrix = objectPtr->getModelMatrix(),
+                    .textureId = texturesInitData[objectPtr->getColorTexturePath()],
+                    .isPortal = bIsPortal    
                 };
-                memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
+                memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
             }
             else
             {
@@ -1056,17 +1329,18 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
             size_t startIdx = t * chunkSize;
             size_t endIdx = (t == numThreads - 1) ? indices.size() : startIdx + chunkSize;
             
-            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx]() 
+            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx, bIsPortal]() 
                 {
                     for (size_t i = startIdx; i < endIdx; ++i) {
                         if (auto objectPtr = primitives[i].lock()) 
                         {
-                            PushConstants data
+                            SSBOData data
                             {
-                                .mvpMatrix = projView * objectPtr->getModelMatrix(),
-                                .textureId = texturesInitData[objectPtr->getColorTexturePath()]
+                                .genericMatrix = objectPtr->getModelMatrix(),
+                                .textureId = texturesInitData[objectPtr->getColorTexturePath()],
+                                .isPortal = bIsPortal
                             };
-                            memcpy((uint8_t*)stagingBufferPtr + i * sizeof(PushConstants), &data, sizeof(PushConstants));
+                            memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
                         } 
                         else 
                         {
@@ -1086,22 +1360,28 @@ void LRenderer::updateStorageBuffers(uint32 imageIndex)
 
         ++instancedArrayNum;
 
-        copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(PushConstants));
+        copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(SSBOData));
     }
 }
 
-void LRenderer::setProjection(float degrees, float zNear, float zFar)
+//void LRenderer::setProjection(float degrees, float zNear, float zFar)
+//{
+//    glm::mat4 proj = glm::perspective(glm::radians(degrees), swapChainExtent.width / (float) swapChainExtent.height, zNear, zFar);
+//    proj[1][1] *= -1;
+//    projection = proj;
+//    bNeedToUpdateProjView = true;
+//}
+
+void LRenderer::setProjection(float degrees, float width, float height, float zNear, float zFar)
 {
-    glm::mat4 proj = glm::perspective(glm::radians(degrees), swapChainExtent.width / (float) swapChainExtent.height, zNear, zFar);
+    glm::mat4 proj = glm::perspective(glm::radians(degrees), width / height, zNear, zFar);
     proj[1][1] *= -1;
     projection = proj;
-    bNeedToUpdateProjView = true;
 }
 
 void LRenderer::setView(const glm::mat4& viewIn)
 {
     view = viewIn;
-    bNeedToUpdateProjView = true;
 }
 
 glm::vec3 LRenderer::getCameraUp() const
@@ -1133,7 +1413,7 @@ void LRenderer::setCameraPosition(const glm::vec3& cameraPosition)
 
 void LRenderer::initProjection()
 {
-    setProjection(degrees, zNear, zFar);
+    setProjection(degrees, swapChainExtent.width, swapChainExtent.height);
 }
 
 void LRenderer::initView()
@@ -1145,7 +1425,6 @@ void LRenderer::initView()
 void LRenderer::updateProjView()
 {
     projView = projection * view;
-    bNeedToUpdateProjView = false;
 }
 
 void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties,
@@ -1189,15 +1468,15 @@ void LRenderer::createInstancesStorageBuffers()
 
      uint64 instancedArraysSize = primitiveCounterInitData.size();
 
-     primitivesData.resize(instancedArraysSize * maxFramesInFlight);
+     primitivesData.resize(instancedArraysSize /** maxFramesInFlight*/);
 
-     for (uint32 i = 0; i < maxFramesInFlight; ++i)
+     //for (uint32 i = 0; i < maxFramesInFlight; ++i)
      {
-         int32 instancedArrayNum = 0;
+         uint32 instancedArrayNum = 0;
          for (const auto& [_, primitivesNum] : primitiveCounterInitData)
          {
-             int32 index = i * instancedArraysSize + instancedArrayNum;
-             auto bufferSize = sizeof(PushConstants) * primitivesNum;
+             uint32 index = /*instancedArraysSize +*/ instancedArrayNum;
+             auto bufferSize = sizeof(SSBOData) * primitivesNum;
              createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY, primitivesData[index].buffer, primitivesData[index].memory);
              ++instancedArrayNum;
          }
@@ -1222,7 +1501,7 @@ uint32 LRenderer::findProperStageBufferSize() const
             maxprimitiveCounterInitData = primitivesNum;
         }
     }
-    return maxprimitiveCounterInitData * sizeof(PushConstants);
+    return maxprimitiveCounterInitData * sizeof(SSBOData);
 }
 
 void LRenderer::vmaMapWrap(VmaAllocator allocator, VmaAllocation* memory, void*& mappedData)
@@ -1306,20 +1585,33 @@ VkResult LRenderer::createDescriptorSets()
              auto& [_, primitivesNum] = *it;
 
              VkDescriptorBufferInfo bufferInfo{};
-             bufferInfo.buffer = primitivesData[i * primitiveCounterInitData.size() + instancedArrayNum].buffer;
+             bufferInfo.buffer = primitivesData[instancedArrayNum].buffer;
              bufferInfo.offset = 0;
-             bufferInfo.range = sizeof(PushConstants) * primitivesNum;
+             bufferInfo.range = sizeof(SSBOData) * primitivesNum;
 
              std::vector<VkDescriptorImageInfo> imageDescriptors;
-             imageDescriptors.reserve(images.size());
+             imageDescriptors.resize(texturesInitData.size());
 
-             for (auto& [_, image] : images)
+             for (auto& [path, image] : images)
              {
                  VkDescriptorImageInfo imageInfo{};
                  imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                  imageInfo.imageView = image.imageView;
                  imageInfo.sampler = textureSamplers[image.mipLevels];
-                 imageDescriptors.push_back(imageInfo);
+
+                 uint32 textureIndex = texturesInitData[path];
+                 imageDescriptors[textureIndex] = imageInfo;
+             }
+
+             for (uint32 j = 0; j < maxPortalNum; ++j)
+             {
+                 VkDescriptorImageInfo imageInfo{};
+                 imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                 imageInfo.imageView = portalsRt[j]->images[i].imageView;
+                 imageInfo.sampler = portalSampler;
+
+                 uint32 textureIndex = texturesInitData[std::format("portal{}", j + 1)];
+                 imageDescriptors[textureIndex] = imageInfo;
              }
 
              std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
@@ -1375,28 +1667,18 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
 {
     ZoneScoped;
 
+    //if (!bUpdatedStaticStorageBuffer)
+    {
+        updateStaticStorageBuffer();
+        bUpdatedStaticStorageBuffer = true;
+    }
+
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0; // Optional
     beginInfo.pInheritanceInfo = nullptr; // Optional
 
     HANDLE_VK_ERROR(vkBeginCommandBuffer(commandBuffer, &beginInfo))
-
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = renderPass;
-    renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = swapChainExtent;
-
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    clearValues[1].depthStencil = { 1.0f, 0 };
-
-    renderPassInfo.clearValueCount = static_cast<uint32>(clearValues.size());
-    renderPassInfo.pClearValues = clearValues.data();
-    
-    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -1411,96 +1693,27 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
     scissor.offset = { 0, 0 };
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    
-    auto drawInstancedMeshes = [this, commandBuffer]()
-        {
-            uint32 instanceArrayNum = 0;
-            for (const auto& [typeName, primitives] : instancedPrimitiveMeshes)
-            {
-                const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
-                VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
-                VkDeviceSize offsets[] = { 0 };
 
-                auto indicesCount = primitives[0].lock()->getIndexBuffer().size();
-                auto instancesCount = primitives.size();
+    //glm::mat4 savedView = getView();
 
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * instancedPrimitiveMeshes.size() + instanceArrayNum], 0, nullptr);
-
-                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-                vkCmdDrawIndexed(commandBuffer, indicesCount, instancesCount, 0, 0, 0);
-                ++instanceArrayNum;
-            }
-        };
-
-    auto drawMeshes = [this, commandBuffer](std::vector<std::weak_ptr<LG::LGraphicsComponent>>& meshes)
-        {
-            for (auto it = meshes.begin(); it != meshes.end(); ++it)
-            {
-                if (!it->expired())
-                {
-                    LG::LGraphicsComponent& mesh = *it->lock();
-
-                    updatePushConstants(mesh);
-                    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
-
-                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getTypeName());
-                    VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
-                    VkDeviceSize offsets[] = { 0 };
-
-                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                    vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-                    vkCmdDrawIndexed(commandBuffer, mesh.getIndicesCount(), 1, 0, 0, 0);
-                }
-                else
-                {
-                    it = meshes.erase(it);
-                }
-            }
-        };
-
-
+    // TODO: Ideally these pass calls should be incapsulated inside RenderPass->render(), but there is some work to do...
     {
-        ZoneScopedN("Instance pass");
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineInstanced);
-        drawInstancedMeshes();
+        ZoneScopedN("Portal passes");
+
+        storedView = view;
+
+        doPortalPass(commandBuffer, portalsRt[0]->framebuffers[currentFrame], portalPasses[0], 0, 1);
+        doPortalPass(commandBuffer, portalsRt[1]->framebuffers[currentFrame], portalPasses[1], 1, 0);
     }
 
     {
-        ZoneScopedN("Regular pass");
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineRegular);
-        drawMeshes(primitiveMeshes);
+        ZoneScopedN("Main pass");
+        view = storedView;
+        updateProjView();
+        doMainPass(commandBuffer, swapChainRt->framebuffers[imageIndex]);
     }
 
-    //DEBUG_CODE(
-    //    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, debugGraphicsPipeline);
-    //    drawMeshes(debugMeshes);
-    //          )
-  
-    vkCmdEndRenderPass(commandBuffer);
     HANDLE_VK_ERROR(vkEndCommandBuffer(commandBuffer))
-}
-
-void LRenderer::cleanupSwapChain()
-{
-    for (uint32 i = 0; i < swapChainFramebuffers.size(); ++i)
-    {
-        vkDestroyFramebuffer(logicalDevice, swapChainFramebuffers[i], nullptr);
-    }
-
-    for (uint32 i = 0; i < swapChainImageViews.size(); ++i)
-    {
-        vkDestroyImageView(logicalDevice, swapChainImageViews[i], nullptr);
-    }
-
-    for (int32 i = 0; i < swapChainImages.size(); ++i)
-    {
-        vkDestroyImageView(logicalDevice, depthImagesView[i], nullptr);
-        vkDestroyImage(logicalDevice, depthImages[i], nullptr);
-        vmaFreeMemory(allocator, depthImagesMemory[i]);
-    }
-
-    vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
 }
 
 void LRenderer::recreateSwapChain()
@@ -1516,27 +1729,37 @@ void LRenderer::recreateSwapChain()
     
     vkDeviceWaitIdle(logicalDevice);
 
-    cleanupSwapChain();
-    
+    swapChainRt->clear();
+    vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
     createSwapChain();
-    createImageViews();
-    createDepthResources();
-    createFramebuffers();
+    createFramebuffers(swapChainRt.get(), swapChainExtent, swapChainSize, mainPass->getRenderPass());
+
+    for (uint32 i = 0; i < portalsRt.size(); ++i)
+    {
+        auto& portalRt = portalsRt[i];
+
+        portalRt->clear();
+        createFramebuffers(portalRt.get(), swapChainExtent, portalSize, portalPasses[i]->getRenderPass());
+    }
 
     initProjection();
 }
 
-void LRenderer::drawFrame()
+void LRenderer::drawFrame(float delta)
 {
-    if (bNeedToUpdateProjView)
+    this->delta = delta;
+
+    uint32 imageIndex;
     {
-        updateProjView();
+        ZoneScopedNC("Render call", 0xFFFF0000);
+        vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
     }
 
-    vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-    uint32 imageIndex;
-
-    VkResult result = vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+    VkResult result;
+    {
+        ZoneScopedN("Acquire next image");
+        result = vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+    }
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
     {
@@ -1547,8 +1770,6 @@ void LRenderer::drawFrame()
     {
         RAISE_VK_ERROR(result)
     }
-
-    updateStorageBuffers(currentFrame);
     
     {
         ZoneScopedN("Rerecording command buffer");
@@ -1572,10 +1793,7 @@ void LRenderer::drawFrame()
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
     
-    {
-        ZoneScopedNC("Render call", 0xFFFF0000);
-        HANDLE_VK_ERROR(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]))
-    }
+    HANDLE_VK_ERROR(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]))
     
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1612,11 +1830,11 @@ void LRenderer::exit()
     vkDeviceWaitIdle(logicalDevice);
 }
 
-void LRenderer::updatePushConstants(const LG::LGraphicsComponent& mesh)
-{
-    glm::mat4 model = mesh.getModelMatrix();
-    pushConstants.mvpMatrix = projView * model;
-}
+//void LRenderer::updatePushConstants(const LG::LGraphicsComponent& mesh)
+//{
+//    glm::mat4 model = mesh.getModelMatrix();
+//    pushConstants.genericMatrix = projView * model;
+//}
 
 VkResult LRenderer::pickPhysicalDevice()
 {
@@ -1669,11 +1887,17 @@ VkResult LRenderer::createLogicalDevice()
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = VK_TRUE;
 
+    VkPhysicalDeviceVulkan12Features deviceFeatures12{};
+    deviceFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    deviceFeatures12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    deviceFeatures12.runtimeDescriptorArray = VK_TRUE;
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
+    createInfo.pNext = &deviceFeatures12;
     createInfo.enabledExtensionCount = static_cast<uint32>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
@@ -1795,18 +2019,18 @@ VkResult LRenderer::createSwapChain()
     swapChainExtent = chooseSwapExtent(swapChainSupport.capabilities);
     swapChainImageFormat = surfaceFormat.format;
 
-    uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+    swapChainSize = swapChainSupport.capabilities.minImageCount + 1;
 
-    if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
+    if (swapChainSupport.capabilities.maxImageCount > 0 && swapChainSize > swapChainSupport.capabilities.maxImageCount)
     {
-        imageCount = swapChainSupport.capabilities.maxImageCount;
+        swapChainSize = swapChainSupport.capabilities.maxImageCount;
     }
     
     VkSwapchainCreateInfoKHR createInfo{};
     
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = surface;
-    createInfo.minImageCount = imageCount;
+    createInfo.minImageCount = swapChainSize;
     createInfo.imageFormat = surfaceFormat.format;
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = swapChainExtent;
@@ -1834,14 +2058,36 @@ VkResult LRenderer::createSwapChain()
     createInfo.clipped = VK_TRUE;
     createInfo.oldSwapchain = VK_NULL_HANDLE;
 
-    VkResult res = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapChain);
-    if (res == VK_SUCCESS)
+    if (!swapChainRt)
     {
-        vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, nullptr);
-        swapChainImages.resize(imageCount);
-        vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, swapChainImages.data());
+        swapChainRt = std::make_unique<RenderTarget>(logicalDevice, allocator);
     }
-    return res;
+
+    if (vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapChain) == VK_SUCCESS)
+    {
+        vkGetSwapchainImagesKHR(logicalDevice, swapChain, &swapChainSize, nullptr);
+
+        std::vector<VkImage> images;
+        images.resize(swapChainSize);
+        vkGetSwapchainImagesKHR(logicalDevice, swapChain, &swapChainSize, images.data());
+
+        swapChainRt->images.resize(swapChainSize);
+        for (uint32 i = 0; i < swapChainSize; ++i)
+        {
+            swapChainRt->images[i].image = images[i];
+        }
+    }
+    else
+    {
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+
+    for (uint32 i = 0; i < swapChainRt->images.size(); ++i)
+    {
+        swapChainRt->images[i].imageView = createImageView(swapChainRt->images[i].image, swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    }
+
+    return VK_SUCCESS;
 }
 
 LRenderer::SwapChainSupportDetails LRenderer::querySwapChainSupport(VkPhysicalDevice device) const
@@ -1943,10 +2189,17 @@ void LRenderer::addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
     if (auto sharedPtr = ptr.lock())
     {
         const auto& typeName = sharedPtr->getTypeName();
-        if (isEnoughInstanceSpace(typeName) && LG::isInstancePrimitive(sharedPtr.get()))
+
+        if (LG::isPortal(sharedPtr.get()))
         {
-            auto& instancesArray = instancedPrimitiveMeshes[typeName];
-            instancesArray.emplace_back(ptr);
+            portals.emplace_back(std::reinterpret_pointer_cast<LG::LPortal>(sharedPtr));
+            auto& staticInstancesArray = staticPreloadedInstancedMeshes[typeName];
+            staticInstancesArray.emplace_back(ptr);
+        }
+        else if (isEnoughStaticInstanceSpace(typeName) && LG::isInstancePrimitive(sharedPtr.get()))
+        {
+            auto& staticInstancesArray = staticPreloadedInstancedMeshes[typeName];
+            staticInstancesArray.emplace_back(ptr);
         }
         else
         {
@@ -1960,7 +2213,172 @@ DEBUG_CODE(void LRenderer::addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponen
     debugMeshes.push_back(ptr);
 })
 
+bool LRenderer::needPortalRecalculation() const
+{
+    if (maxPortalNum == 0)
+    {
+        return false;
+    }
+    for (uint32 i = 0; i < portals.size(); ++i)
+    {
+        if (std::shared_ptr<LG::LPortal> portalPtr = portals[i].lock())
+        {
+            if (portalPtr->needsRecalculation())
+            {
+                return true;
+            }
+        }
+        else
+        {
+            // TODO: should be erased
+        }
+    }
+    return false;
+}
+
 void LRenderer::framebufferResizeCallback(GLFWwindow* window, int32 width, int32 height)
 {
     LRenderer::bFramebufferResized = true;
+}
+
+LRenderer::RenderTarget::~RenderTarget()
+{
+    clear(true);
+}
+
+void LRenderer::RenderTarget::clear(bool bClearImages)
+{
+    for (uint32 i = 0; i < framebuffers.size(); ++i)
+    {
+        vkDestroyFramebuffer(logicalDevice, framebuffers[i], nullptr);
+    }
+
+    for (int32 i = 0; i < images.size(); ++i)
+    {
+        vkDestroyImageView(logicalDevice, images[i].imageView, nullptr);
+        vkDestroyImageView(logicalDevice, depthImages[i].imageView, nullptr);
+        vkDestroyImage(logicalDevice, depthImages[i].image, nullptr);
+        vmaFreeMemory(allocator, depthImages[i].allocation);
+
+        if (bClearImages)
+        {
+            vkDestroyImage(logicalDevice, images[i].image, nullptr);
+            if (images[i].allocation)
+            {
+                vmaFreeMemory(allocator, images[i].allocation);
+            }
+        }
+    }
+
+    images.clear();
+    depthImages.clear();
+    framebuffers.clear();
+}
+
+LRenderer::RenderPass::RenderPass(VkDevice logicalDevice, VkFormat colorFormat, VkFormat depthFormat, bool bToPresent)
+    :logicalDevice(logicalDevice), bToPresent(bToPresent)
+{
+    init(colorFormat, depthFormat);
+}
+
+LRenderer::RenderPass::~RenderPass()
+{
+    clear();
+}
+
+void LRenderer::RenderPass::init(VkFormat colorFormat, VkFormat depthFormat)
+{
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = colorFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = bToPresent? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = depthFormat;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkSubpassDependency depthDependency{};
+    depthDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    depthDependency.dstSubpass = 0;
+    depthDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    depthDependency.srcAccessMask = 0;
+    depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    std::array<VkSubpassDependency, 2> dependencies = { dependency, depthDependency };
+    std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = static_cast<uint32>(attachments.size());
+    renderPassInfo.pAttachments = attachments.data();
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+    renderPassInfo.dependencyCount = static_cast<uint32>(dependencies.size());
+    renderPassInfo.pDependencies = dependencies.data();
+
+    HANDLE_VK_ERROR(vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass))
+}
+
+void LRenderer::RenderPass::beginPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, const VkExtent2D& size)
+{
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = renderPass;
+    renderPassInfo.framebuffer = framebuffer;
+    renderPassInfo.renderArea.offset = { 0, 0 };
+    renderPassInfo.renderArea.extent = size;
+
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+    clearValues[1].depthStencil = { 1.0f, 0 };
+
+    renderPassInfo.clearValueCount = static_cast<uint32>(clearValues.size());
+    renderPassInfo.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void LRenderer::RenderPass::endPass(VkCommandBuffer commandBuffer)
+{
+    vkCmdEndRenderPass(commandBuffer);
+}
+
+void LRenderer::RenderPass::clear()
+{
+    vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
 }
