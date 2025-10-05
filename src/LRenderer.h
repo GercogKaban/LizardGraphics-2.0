@@ -131,7 +131,7 @@ public:
 
 	GLFWwindow* getWindow() { return window; }
 
-	void setProjection(float degrees, float width, float height, float zNear = 0.1f, float zFar = 100.0f);
+	void setProjection(float degrees, float width, float height, float zNear = 0.0005f, float zFar = 100.0f);
 
 	void setView(const glm::mat4& view);
 
