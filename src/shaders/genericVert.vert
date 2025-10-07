@@ -23,6 +23,7 @@ layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) flat out uint textureId;
 layout(location = 3) flat out uint isPortal;
 layout(location = 4) flat out vec2 extent;
+layout(location = 5) out vec3 position;
 
 void main() 
 {
@@ -32,4 +33,5 @@ void main()
     textureId = 0; //constants.textureId_R_R_R.x;
     isPortal = 0;
     extent = vec2(constants.width, constants.height);
+    position = inPosition;
 }

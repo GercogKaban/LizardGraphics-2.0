@@ -1294,7 +1294,15 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
         // buffer array
         VkBuffer bufferToCopy = primitivesData[instancedArrayNum].buffer;
         const auto& indices = primitiveDataIndices[primitiveName];
-        bool bIsPortal = primitiveName == "LPortal";
+        uint32 portalIndex = 0;
+        if (primitiveName == "BluePortal") 
+        {
+            portalIndex = 1;
+        } 
+        else if (primitiveName == "OrangePortal") 
+        {
+            portalIndex = 2;
+        }
 
 #if _MSC_VER
         std::for_each(std::execution::par_unseq, indices.begin(), indices.end(), [&](uint32 i)
@@ -1306,7 +1314,7 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
                 {
                     .genericMatrix = objectPtr->getModelMatrix(),
                     .textureId = texturesInitData[objectPtr->getColorTexturePath()],
-                    .isPortal = bIsPortal    
+                    .isPortal = portalIndex    
                 };
                 memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
             }
@@ -1329,7 +1337,7 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
             size_t startIdx = t * chunkSize;
             size_t endIdx = (t == numThreads - 1) ? indices.size() : startIdx + chunkSize;
             
-            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx, bIsPortal]() 
+            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx, portalIndex]() 
                 {
                     for (size_t i = startIdx; i < endIdx; ++i) {
                         if (auto objectPtr = primitives[i].lock()) 
@@ -1338,7 +1346,7 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
                             {
                                 .genericMatrix = objectPtr->getModelMatrix(),
                                 .textureId = texturesInitData[objectPtr->getColorTexturePath()],
-                                .isPortal = bIsPortal
+                                .isPortal = portalIndex
                             };
                             memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
                         } 

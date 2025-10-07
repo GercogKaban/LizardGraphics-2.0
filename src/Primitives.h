@@ -186,4 +186,24 @@ namespace LG
         return dynamic_cast<LG::LPortal*>(ptr);
     }
 
+    class BluePortal: public LPortal
+    {
+        public:
+
+        BluePortal()
+        {
+            typeName = std::string("BluePortal");
+        }
+    };
+
+    class OrangePortal: public LPortal
+    {
+        public:
+        
+        OrangePortal()
+        {
+            typeName = std::string("OrangePortal");
+        }
+    };
+
 }
