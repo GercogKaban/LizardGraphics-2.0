@@ -194,48 +194,6 @@ void LRenderer::cleanup()
     vkDestroyInstance(instance, nullptr);
 }
 
-glm::mat4 LRenderer::computeExitPortalView(
-    const glm::vec3& playerPos,
-    const glm::vec3& enterPos, const glm::vec3& enterNormal,
-    const glm::vec3& exitPos, const glm::vec3& exitNormal
-) {
-    // Compute basis vectors for enter portal
-    glm::vec3 enterRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), enterNormal));
-    glm::vec3 enterUp = glm::normalize(glm::cross(enterNormal, enterRight));
-
-    // Compute basis vectors for exit portal
-    glm::vec3 exitRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), exitNormal));
-    glm::vec3 exitUp = glm::normalize(glm::cross(exitNormal, exitRight));
-
-    // Create transformation matrices for both portals
-    glm::mat4 enterTransform = glm::mat4(1.0f);
-    enterTransform[0] = glm::vec4(enterRight, 0.0f);
-    enterTransform[1] = glm::vec4(enterUp, 0.0f);
-    enterTransform[2] = glm::vec4(enterNormal, 0.0f);
-    enterTransform[3] = glm::vec4(enterPos, 1.0f);
-
-    glm::mat4 exitTransform = glm::mat4(1.0f);
-    exitTransform[0] = glm::vec4(exitRight, 0.0f);
-    exitTransform[1] = glm::vec4(exitUp, 0.0f);
-    exitTransform[2] = glm::vec4(exitNormal, 0.0f);
-    exitTransform[3] = glm::vec4(exitPos, 1.0f);
-
-    // Transform player position to exit portal space
-    glm::mat4 enterToExit = exitTransform * glm::inverse(enterTransform);
-    glm::vec4 transformedPos = enterToExit * glm::vec4(playerPos, 1.0f);
-
-    // Compute player's forward direction in portal space
-    glm::vec3 forward = glm::normalize(playerPos - enterPos);
-    glm::vec4 transformedForward = enterToExit * glm::vec4(forward, 0.0f);
-
-    // Compute the new camera view matrix
-    return glm::lookAt(
-        glm::vec3(transformedPos),  // New camera position
-        glm::vec3(transformedPos) + glm::vec3(transformedForward),  // Look direction
-        glm::vec3(exitUp)  // Up vector
-    );
-}
-
 bool equal(float a, float b, float epsilon = 1e-6)
 {
     return std::fabs(a - b) < epsilon;

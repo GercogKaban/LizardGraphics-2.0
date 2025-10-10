@@ -139,12 +139,6 @@ public:
 	glm::vec3 getCameraFront() const;
 	glm::vec3 getCameraPosition() const;
 
-	glm::mat4 computeExitPortalView(
-		const glm::vec3& playerPos,
-		const glm::vec3& enterPos, const glm::vec3& enterNormal,
-		const glm::vec3& exitPos, const glm::vec3& exitNormal
-	);
-
 	void setCameraFront(const glm::vec3& cameraFront);
 	void setCameraPosition(const glm::vec3& cameraPosition);
 	inline void setCameraPositionToPlayer(const glm::vec3& cameraPosition) {
