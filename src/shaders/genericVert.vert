@@ -21,7 +21,7 @@ layout(location = 2) in vec2 inTexCoord;
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) flat out uint textureId;
-layout(location = 3) flat out uint isPortal;
+layout(location = 3) flat out uint primitiveNum;
 layout(location = 4) flat out vec2 extent;
 layout(location = 5) out vec3 position;
 

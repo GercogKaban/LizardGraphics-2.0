@@ -29,8 +29,8 @@ DEBUG_CODE(
 
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
-std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
-std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
+std::unordered_map<LG::EPrimitiveType, int32> RenderComponentBuilder::objectsCounter;
+std::unordered_map<LG::EPrimitiveType, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
 LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData)
     :primitiveCounterInitData(initData.primitiveCounter), maxPortalNum(initData.maxPortalNum)
@@ -290,9 +290,11 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
     auto drawStaticInstancedMeshes = [this, commandBuffer, bSwitchRenderPass]()
         {
             uint32 instanceArrayNum = 0;
-            for (const auto& [typeName, primitives] : preloadedInstancedMeshes)
+            for (const auto& [type, primitives] : preloadedInstancedMeshes)
             {
-                bool bIsPortal = typeName == "LPortal";
+                bool bIsPortal = type == LG::EPrimitiveType::BluePortal || type == LG::EPrimitiveType::OrangePortal 
+                    || type == LG::EPrimitiveType::GenericPortal;
+
                 // TODO: actually here we should only ignore current portal
                 if (!bSwitchRenderPass && bIsPortal)
                 {
@@ -301,7 +303,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
 
                 else
                 {
-                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(type);
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 
@@ -345,7 +347,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
 
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
 
-                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getTypeName());
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getType());
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 
@@ -1247,23 +1249,13 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
     uint64 instancedArraysSize = preloadedInstancedMeshes.size();
 
     int32 instancedArrayNum = 0;
-    for (const auto& [primitiveName, primitives] : preloadedInstancedMeshes)
+    for (const auto& [primitiveType, primitives] : preloadedInstancedMeshes)
     {
         VkBuffer bufferToCopy = primitivesData[instancedArrayNum].buffer;
-        const auto& indices = primitiveDataIndices[primitiveName];
+        const auto& indices = primitiveDataIndices[primitiveType];
         uint32 portalIndex = 0;
 
-        // TODO: Should be changed to number
-        if (primitiveName == "BluePortal") 
-        {
-            portalIndex = 1;
-        } 
-        else if (primitiveName == "OrangePortal") 
-        {
-            portalIndex = 2;
-        }
-
-        uint32 beginIndex = bIsFirstDraw? 0 : preloadedInstancedMeshesDynamicOffsets[primitiveName];
+        uint32 beginIndex = bIsFirstDraw? 0 : preloadedInstancedMeshesDynamicOffsets[primitiveType];
         beginIndex = glm::clamp(beginIndex, (uint32)0, (uint32)(indices.size() - 1));
 
 #if _MSC_VER
@@ -1276,7 +1268,7 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
                 {
                     .genericMatrix = objectPtr->getModelMatrix(),
                     .textureId = texturesInitData[objectPtr->getColorTexturePath()],
-                    .isPortal = portalIndex
+                    .primitiveNum = static_cast<uint32_t>(primitiveType),
                 };
                 memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
             }
@@ -2176,20 +2168,20 @@ void LRenderer::addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
     if (auto sharedPtr = ptr.lock())
     {
-        const auto& typeName = sharedPtr->getTypeName();
+        LG::EPrimitiveType type = sharedPtr->getType();
 
         if (LG::isPortal(sharedPtr.get()))
         {
             portals.emplace_back(std::reinterpret_pointer_cast<LG::LPortal>(sharedPtr));
-            auto& staticInstancesArray = preloadedInstancedMeshes[typeName];
+            auto& staticInstancesArray = preloadedInstancedMeshes[type];
             staticInstancesArray.emplace_back(ptr);
         }
-        else if (isEnoughPreloadedInstanceSpace(typeName) && LG::isInstancePrimitive(sharedPtr.get()))
+        else if (isEnoughPreloadedInstanceSpace(type) && LG::isInstancePrimitive(sharedPtr.get()))
         {
-            auto& staticInstancesArray = preloadedInstancedMeshes[typeName];
+            auto& staticInstancesArray = preloadedInstancedMeshes[type];
             if (!staticInstancesArray.size())
             {
-                preloadedInstancedMeshesDynamicOffsets[typeName] = invalidDynamicOffset;
+                preloadedInstancedMeshesDynamicOffsets[type] = invalidDynamicOffset;
             }
 
             staticInstancesArray.emplace_back(ptr);

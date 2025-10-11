@@ -38,7 +38,7 @@ public:
 
 	struct StaticInitData
 	{
-		std::unordered_map<std::string, uint32> primitiveCounter;
+		std::unordered_map<LG::EPrimitiveType, uint32> primitiveCounter;
 		std::set<std::string> textures;
 		uint32 maxPortalNum = 0;
 	};
@@ -63,7 +63,7 @@ public:
 		glm::mat4 genericMatrix;
 
 		uint32 textureId = 0;
-		uint32 isPortal = 0;
+		uint32 primitiveNum = 0;
 		uint32 reserved2 = 0;
 		uint32 reserved3 = 0;
 	};
@@ -221,10 +221,10 @@ protected:
 	// TODO: naming should be changed
 	void updateStaticStorageBuffer(/*uint32 imageIndex*/);
 
-	bool isEnoughPreloadedInstanceSpace(const std::string& typeName)
+	bool isEnoughPreloadedInstanceSpace(LG::EPrimitiveType type)
 	{
-		uint32 counter = primitiveCounterInitData[typeName];
-		return preloadedInstancedMeshes[typeName].size() < counter;
+		uint32 counter = primitiveCounterInitData[type];
+		return preloadedInstancedMeshes[type].size() < counter;
 	}
 	
 	void initProjection();
@@ -421,7 +421,7 @@ protected:
 	};
 
 	// used for multithread write
-	std::unordered_map<std::string, std::vector<uint32>> primitiveDataIndices;
+	std::unordered_map<LG::EPrimitiveType, std::vector<uint32>> primitiveDataIndices;
 	
 	// TODO: should be destroyed
 	std::vector<ObjectDataBuffer> primitivesData;
@@ -430,7 +430,7 @@ protected:
 	ObjectDataBuffer stagingBuffer;
 	void* stagingBufferPtr;
 
-	std::unordered_map<std::string, uint32> primitiveCounterInitData;
+	std::unordered_map<LG::EPrimitiveType, uint32> primitiveCounterInitData;
 	std::unordered_map<std::string, uint32> texturesInitData;
 	uint32 maxPortalNum;
 
@@ -460,9 +460,9 @@ protected:
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
 
 	// instanced preloaded meshes
-	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> preloadedInstancedMeshes;
+	std::unordered_map<LG::EPrimitiveType, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> preloadedInstancedMeshes;
 	// points to a place where dynamic objects should start
-	std::unordered_map<std::string, uint32> preloadedInstancedMeshesDynamicOffsets;
+	std::unordered_map<LG::EPrimitiveType, uint32> preloadedInstancedMeshesDynamicOffsets;
 	const uint32 invalidDynamicOffset = UINT32_MAX;
 	
 	//bool bUpdatedStaticStorageBuffer = false;
@@ -514,8 +514,8 @@ protected:
 		// TODO: it worth to implement UE FName alternative to save some memory
 		if (LRenderer* renderer = LRenderer::get())
 		{
-			auto resCounter = objectsCounter.emplace(object->getTypeName(), 0);
-			auto resBuffer = memoryBuffers.emplace(object->getTypeName(), LRenderer::VkMemoryBuffer());
+			auto resCounter = objectsCounter.emplace(object->getType(), 0);
+			auto resBuffer = memoryBuffers.emplace(object->getType(), LRenderer::VkMemoryBuffer());
 
 			if (resCounter.first->second++ == 0)
 			{
@@ -532,8 +532,8 @@ protected:
 	template<typename T>
 	static void destruct(T* object)
 	{
-		auto resCounter = objectsCounter.find(object->getTypeName());
-		auto resBuffer = memoryBuffers.find(object->getTypeName());
+		auto resCounter = objectsCounter.find(object->getType());
+		auto resBuffer = memoryBuffers.find(object->getType());
 
 		if (int32 counter = --resCounter->second; counter == 0)
 		{
@@ -545,9 +545,9 @@ protected:
 		}
 	}
 
-	[[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
+	[[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(LG::EPrimitiveType primitiveType)
 	{
-		return memoryBuffers[primitiveName];
+		return memoryBuffers[primitiveType];
 	}
 
 	DEBUG_CODE(
@@ -556,8 +556,8 @@ protected:
 
 protected:
 
-	static std::unordered_map<std::string, int32> objectsCounter;
-	static std::unordered_map<std::string, LRenderer::VkMemoryBuffer> memoryBuffers;
+	static std::unordered_map<LG::EPrimitiveType, int32> objectsCounter;
+	static std::unordered_map<LG::EPrimitiveType, LRenderer::VkMemoryBuffer> memoryBuffers;
 
 	DEBUG_CODE(
 		static bool bIsConstructing;
