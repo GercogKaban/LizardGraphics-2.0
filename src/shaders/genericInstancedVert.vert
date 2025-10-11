@@ -4,7 +4,7 @@ struct SSBOEntry
 {
     mat4 model;
     uint textureId;
-    uint isPortal;
+    uint primitiveNum;
     uint reserved2;
     uint reserved3;
 };
@@ -40,7 +40,7 @@ void main()
     fragColor = inColor;
     fragTexCoord = inTexCoord;
     textureId = ssbo.entries[gl_InstanceIndex].textureId;
-    isPortal = ssbo.entries[gl_InstanceIndex].isPortal;
+    primitiveNum = ssbo.entries[gl_InstanceIndex].primitiveNum;
     extent.x = constants.width;
     extent.y = constants.height;
     position = inPosition;

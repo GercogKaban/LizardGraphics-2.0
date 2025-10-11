@@ -31,7 +31,7 @@ void main()
     fragColor = inColor;
     fragTexCoord = inTexCoord;
     textureId = 0; //constants.textureId_R_R_R.x;
-    isPortal = 0;
+    primitiveNum = 0;
     extent = vec2(constants.width, constants.height);
     position = inPosition;
 }
