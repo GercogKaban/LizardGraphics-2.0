@@ -97,6 +97,7 @@ namespace LG
         virtual ~LGraphicsComponent();
 
         const std::function<glm::mat4x4()> getModelMatrix = [](){ return glm::mat4x4(1); };
+        const std::function<bool()> isAlwaysStatic = []() { return true; };
         
     protected:
 

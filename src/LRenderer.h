@@ -32,7 +32,7 @@ class LRenderer
 	
 public:
 
-
+	// TODO: Should be fixed
 	glm::mat4 playerModel;
 	glm::quat playerOrientation;
 
@@ -217,13 +217,14 @@ protected:
 	VkFormat findDepthFormat();
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
-
+	
+	// TODO: naming should be changed
 	void updateStaticStorageBuffer(/*uint32 imageIndex*/);
 
-	bool isEnoughStaticInstanceSpace(const std::string& typeName)
+	bool isEnoughPreloadedInstanceSpace(const std::string& typeName)
 	{
 		uint32 counter = primitiveCounterInitData[typeName];
-		return staticPreloadedInstancedMeshes[typeName].size() < counter;
+		return preloadedInstancedMeshes[typeName].size() < counter;
 	}
 	
 	void initProjection();
@@ -238,7 +239,7 @@ protected:
     };
 	
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties, VkBuffer& buffer, VmaAllocation& bufferMemory, uint32 vmaFlags = 0);
-	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
 	void createInstancesStorageBuffers();
 	uint32 findProperStageBufferSize() const;
 
@@ -327,6 +328,8 @@ protected:
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 	uint32 getMaxAnisotropy(VkPhysicalDevice physicalDeviceIn) const;
 
+	void sortPreloadedInstancedMeshes();
+
 	void addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);
 	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
 
@@ -408,6 +411,9 @@ protected:
 	static const int32 maxFramesInFlight = 2;
 	uint32 currentFrame = 0;
 
+	// TODO: should be refreshed when we unload "levels"
+	bool bIsFirstDraw = true;
+
 	struct ObjectDataBuffer
 	{
 		VkBuffer buffer;
@@ -449,10 +455,17 @@ protected:
 	
 	// TODO: doesn't work properly
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
+
+	// None instanced (preloaded for now) meshes
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
-	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> staticPreloadedInstancedMeshes;
+
+	// instanced preloaded meshes
+	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> preloadedInstancedMeshes;
+	// points to a place where dynamic objects should start
+	std::unordered_map<std::string, uint32> preloadedInstancedMeshesDynamicOffsets;
+	const uint32 invalidDynamicOffset = UINT32_MAX;
 	
-	bool bUpdatedStaticStorageBuffer = false;
+	//bool bUpdatedStaticStorageBuffer = false;
 	//std::unordered_map<uint32, bool> updatedStorageBuffer;
 
 	std::vector<std::weak_ptr<LG::LPortal>> portals;
