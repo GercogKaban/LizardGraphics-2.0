@@ -1306,7 +1306,7 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
                             {
                                 .genericMatrix = objectPtr->getModelMatrix(),
                                 .textureId = texturesInitData[objectPtr->getColorTexturePath()],
-                                .isPortal = portalIndex
+                                .primitiveNum = static_cast<uint32_t>(primitiveType)
                             };
                             memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
                         } 
