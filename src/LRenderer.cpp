@@ -1428,6 +1428,31 @@ void LRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize 
     copyRegion.srcOffset = srcOffset;
     copyRegion.dstOffset = dstOffset;
 
+    VkBufferMemoryBarrier memoryBarrier =
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .buffer = dstBuffer,
+        .offset = dstOffset,
+        .size = size,
+    };
+
+    {
+        ZoneScopedN("copyBuffer memory barrier");
+
+        vkCmdPipelineBarrier(commandBuffer,
+            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            1,
+            &memoryBarrier,
+            0,
+            nullptr);
+    }
+
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
     endSingleTimeCommands(commandBuffer);
 }
