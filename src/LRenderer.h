@@ -32,13 +32,13 @@ class LRenderer
 	
 public:
 
-
+	// TODO: Should be fixed
 	glm::mat4 playerModel;
 	glm::quat playerOrientation;
 
 	struct StaticInitData
 	{
-		std::unordered_map<std::string, uint32> primitiveCounter;
+		std::unordered_map<LG::EPrimitiveType, uint32> primitiveCounter;
 		std::set<std::string> textures;
 		uint32 maxPortalNum = 0;
 	};
@@ -63,7 +63,7 @@ public:
 		glm::mat4 genericMatrix;
 
 		uint32 textureId = 0;
-		uint32 isPortal = 0;
+		uint32 primitiveNum = 0;
 		uint32 reserved2 = 0;
 		uint32 reserved3 = 0;
 	};
@@ -131,19 +131,13 @@ public:
 
 	GLFWwindow* getWindow() { return window; }
 
-	void setProjection(float degrees, float width, float height, float zNear = 0.1f, float zFar = 100.0f);
+	void setProjection(float degrees, float width, float height, float zNear = 0.0005f, float zFar = 100.0f);
 
 	void setView(const glm::mat4& view);
 
 	glm::vec3 getCameraUp() const;
 	glm::vec3 getCameraFront() const;
 	glm::vec3 getCameraPosition() const;
-
-	glm::mat4 computeExitPortalView(
-		const glm::vec3& playerPos,
-		const glm::vec3& enterPos, const glm::vec3& enterNormal,
-		const glm::vec3& exitPos, const glm::vec3& exitNormal
-	);
 
 	void setCameraFront(const glm::vec3& cameraFront);
 	void setCameraPosition(const glm::vec3& cameraPosition);
@@ -223,13 +217,14 @@ protected:
 	VkFormat findDepthFormat();
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
-
+	
+	// TODO: naming should be changed
 	void updateStaticStorageBuffer(/*uint32 imageIndex*/);
 
-	bool isEnoughStaticInstanceSpace(const std::string& typeName)
+	bool isEnoughPreloadedInstanceSpace(LG::EPrimitiveType type)
 	{
-		uint32 counter = primitiveCounterInitData[typeName];
-		return staticPreloadedInstancedMeshes[typeName].size() < counter;
+		uint32 counter = primitiveCounterInitData[type];
+		return preloadedInstancedMeshes[type].size() < counter;
 	}
 	
 	void initProjection();
@@ -244,7 +239,7 @@ protected:
     };
 	
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage properties, VkBuffer& buffer, VmaAllocation& bufferMemory, uint32 vmaFlags = 0);
-	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
 	void createInstancesStorageBuffers();
 	uint32 findProperStageBufferSize() const;
 
@@ -333,6 +328,8 @@ protected:
 	uint32 getPushConstantSize(VkPhysicalDevice physicalDevice) const;
 	uint32 getMaxAnisotropy(VkPhysicalDevice physicalDeviceIn) const;
 
+	void sortPreloadedInstancedMeshes();
+
 	void addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);
 	DEBUG_CODE(void addDebugPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr);)
 
@@ -414,6 +411,9 @@ protected:
 	static const int32 maxFramesInFlight = 2;
 	uint32 currentFrame = 0;
 
+	// TODO: should be refreshed when we unload "levels"
+	bool bIsFirstDraw = true;
+
 	struct ObjectDataBuffer
 	{
 		VkBuffer buffer;
@@ -421,7 +421,7 @@ protected:
 	};
 
 	// used for multithread write
-	std::unordered_map<std::string, std::vector<uint32>> primitiveDataIndices;
+	std::unordered_map<LG::EPrimitiveType, std::vector<uint32>> primitiveDataIndices;
 	
 	// TODO: should be destroyed
 	std::vector<ObjectDataBuffer> primitivesData;
@@ -430,7 +430,7 @@ protected:
 	ObjectDataBuffer stagingBuffer;
 	void* stagingBufferPtr;
 
-	std::unordered_map<std::string, uint32> primitiveCounterInitData;
+	std::unordered_map<LG::EPrimitiveType, uint32> primitiveCounterInitData;
 	std::unordered_map<std::string, uint32> texturesInitData;
 	uint32 maxPortalNum;
 
@@ -455,10 +455,17 @@ protected:
 	
 	// TODO: doesn't work properly
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> debugMeshes;
+
+	// None instanced (preloaded for now) meshes
 	std::vector<std::weak_ptr<LG::LGraphicsComponent>> primitiveMeshes;
-	std::unordered_map<std::string, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> staticPreloadedInstancedMeshes;
+
+	// instanced preloaded meshes
+	std::unordered_map<LG::EPrimitiveType, std::vector<std::weak_ptr<LG::LGraphicsComponent>>> preloadedInstancedMeshes;
+	// points to a place where dynamic objects should start
+	std::unordered_map<LG::EPrimitiveType, uint32> preloadedInstancedMeshesDynamicOffsets;
+	const uint32 invalidDynamicOffset = UINT32_MAX;
 	
-	bool bUpdatedStaticStorageBuffer = false;
+	//bool bUpdatedStaticStorageBuffer = false;
 	//std::unordered_map<uint32, bool> updatedStorageBuffer;
 
 	std::vector<std::weak_ptr<LG::LPortal>> portals;
@@ -507,8 +514,8 @@ protected:
 		// TODO: it worth to implement UE FName alternative to save some memory
 		if (LRenderer* renderer = LRenderer::get())
 		{
-			auto resCounter = objectsCounter.emplace(object->getTypeName(), 0);
-			auto resBuffer = memoryBuffers.emplace(object->getTypeName(), LRenderer::VkMemoryBuffer());
+			auto resCounter = objectsCounter.emplace(object->getType(), 0);
+			auto resBuffer = memoryBuffers.emplace(object->getType(), LRenderer::VkMemoryBuffer());
 
 			if (resCounter.first->second++ == 0)
 			{
@@ -525,8 +532,8 @@ protected:
 	template<typename T>
 	static void destruct(T* object)
 	{
-		auto resCounter = objectsCounter.find(object->getTypeName());
-		auto resBuffer = memoryBuffers.find(object->getTypeName());
+		auto resCounter = objectsCounter.find(object->getType());
+		auto resBuffer = memoryBuffers.find(object->getType());
 
 		if (int32 counter = --resCounter->second; counter == 0)
 		{
@@ -538,9 +545,9 @@ protected:
 		}
 	}
 
-	[[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(const std::string& primitiveName)
+	[[nodiscard]] static const LRenderer::VkMemoryBuffer& getMemoryBuffer(LG::EPrimitiveType primitiveType)
 	{
-		return memoryBuffers[primitiveName];
+		return memoryBuffers[primitiveType];
 	}
 
 	DEBUG_CODE(
@@ -549,8 +556,8 @@ protected:
 
 protected:
 
-	static std::unordered_map<std::string, int32> objectsCounter;
-	static std::unordered_map<std::string, LRenderer::VkMemoryBuffer> memoryBuffers;
+	static std::unordered_map<LG::EPrimitiveType, int32> objectsCounter;
+	static std::unordered_map<LG::EPrimitiveType, LRenderer::VkMemoryBuffer> memoryBuffers;
 
 	DEBUG_CODE(
 		static bool bIsConstructing;

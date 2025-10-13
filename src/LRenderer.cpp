@@ -29,8 +29,8 @@ DEBUG_CODE(
 
 LRenderer* LRenderer::thisPtr = nullptr;
 bool LRenderer::bFramebufferResized = false;
-std::unordered_map<std::string, int32> RenderComponentBuilder::objectsCounter;
-std::unordered_map<std::string, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
+std::unordered_map<LG::EPrimitiveType, int32> RenderComponentBuilder::objectsCounter;
+std::unordered_map<LG::EPrimitiveType, LRenderer::VkMemoryBuffer> RenderComponentBuilder::memoryBuffers;
 
 LRenderer::LRenderer(const std::unique_ptr<LWindow>& window, StaticInitData&& initData)
     :primitiveCounterInitData(initData.primitiveCounter), maxPortalNum(initData.maxPortalNum)
@@ -194,48 +194,6 @@ void LRenderer::cleanup()
     vkDestroyInstance(instance, nullptr);
 }
 
-glm::mat4 LRenderer::computeExitPortalView(
-    const glm::vec3& playerPos,
-    const glm::vec3& enterPos, const glm::vec3& enterNormal,
-    const glm::vec3& exitPos, const glm::vec3& exitNormal
-) {
-    // Compute basis vectors for enter portal
-    glm::vec3 enterRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), enterNormal));
-    glm::vec3 enterUp = glm::normalize(glm::cross(enterNormal, enterRight));
-
-    // Compute basis vectors for exit portal
-    glm::vec3 exitRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), exitNormal));
-    glm::vec3 exitUp = glm::normalize(glm::cross(exitNormal, exitRight));
-
-    // Create transformation matrices for both portals
-    glm::mat4 enterTransform = glm::mat4(1.0f);
-    enterTransform[0] = glm::vec4(enterRight, 0.0f);
-    enterTransform[1] = glm::vec4(enterUp, 0.0f);
-    enterTransform[2] = glm::vec4(enterNormal, 0.0f);
-    enterTransform[3] = glm::vec4(enterPos, 1.0f);
-
-    glm::mat4 exitTransform = glm::mat4(1.0f);
-    exitTransform[0] = glm::vec4(exitRight, 0.0f);
-    exitTransform[1] = glm::vec4(exitUp, 0.0f);
-    exitTransform[2] = glm::vec4(exitNormal, 0.0f);
-    exitTransform[3] = glm::vec4(exitPos, 1.0f);
-
-    // Transform player position to exit portal space
-    glm::mat4 enterToExit = exitTransform * glm::inverse(enterTransform);
-    glm::vec4 transformedPos = enterToExit * glm::vec4(playerPos, 1.0f);
-
-    // Compute player's forward direction in portal space
-    glm::vec3 forward = glm::normalize(playerPos - enterPos);
-    glm::vec4 transformedForward = enterToExit * glm::vec4(forward, 0.0f);
-
-    // Compute the new camera view matrix
-    return glm::lookAt(
-        glm::vec3(transformedPos),  // New camera position
-        glm::vec3(transformedPos) + glm::vec3(transformedForward),  // Look direction
-        glm::vec3(exitUp)  // Up vector
-    );
-}
-
 bool equal(float a, float b, float epsilon = 1e-6)
 {
     return std::fabs(a - b) < epsilon;
@@ -332,9 +290,11 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
     auto drawStaticInstancedMeshes = [this, commandBuffer, bSwitchRenderPass]()
         {
             uint32 instanceArrayNum = 0;
-            for (const auto& [typeName, primitives] : staticPreloadedInstancedMeshes)
+            for (const auto& [type, primitives] : preloadedInstancedMeshes)
             {
-                bool bIsPortal = typeName == "LPortal";
+                bool bIsPortal = type == LG::EPrimitiveType::BluePortal || type == LG::EPrimitiveType::OrangePortal 
+                    || type == LG::EPrimitiveType::GenericPortal;
+
                 // TODO: actually here we should only ignore current portal
                 if (!bSwitchRenderPass && bIsPortal)
                 {
@@ -343,7 +303,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
 
                 else
                 {
-                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(typeName);
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(type);
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 
@@ -359,7 +319,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
 
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
 
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * staticPreloadedInstancedMeshes.size() + instanceArrayNum], 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame * preloadedInstancedMeshes.size() + instanceArrayNum], 0, nullptr);
 
                     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
                     vkCmdBindIndexBuffer(commandBuffer, memoryBuffer.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
@@ -387,7 +347,7 @@ void LRenderer::doMainPass(VkCommandBuffer commandBuffer, VkFramebuffer framebuf
 
                     vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &projViewConstants);
 
-                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getTypeName());
+                    const auto& memoryBuffer = RenderComponentBuilder::getMemoryBuffer(mesh.getType());
                     VkBuffer vertexBuffers[] = { memoryBuffer.vertexBuffer };
                     VkDeviceSize offsets[] = { 0 };
 
@@ -960,14 +920,14 @@ void LRenderer::clearUndefinedImage(VkImage imageToClear)
     );
 
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     vkCmdPipelineBarrier(
         commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         0,
         0, nullptr,
         0, nullptr,
@@ -1286,18 +1246,20 @@ void LRenderer::endSingleTimeCommands(VkCommandBuffer commandBuffer)
 void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
 {
     ZoneScoped;
-    uint64 instancedArraysSize = staticPreloadedInstancedMeshes.size();
+    uint64 instancedArraysSize = preloadedInstancedMeshes.size();
 
     int32 instancedArrayNum = 0;
-    for (const auto& [primitiveName, primitives] : staticPreloadedInstancedMeshes)
+    for (const auto& [primitiveType, primitives] : preloadedInstancedMeshes)
     {
-        // buffer array
         VkBuffer bufferToCopy = primitivesData[instancedArrayNum].buffer;
-        const auto& indices = primitiveDataIndices[primitiveName];
-        bool bIsPortal = primitiveName == "LPortal";
+        const auto& indices = primitiveDataIndices[primitiveType];
+        uint32 portalIndex = 0;
+
+        uint32 beginIndex = bIsFirstDraw? 0 : preloadedInstancedMeshesDynamicOffsets[primitiveType];
+        beginIndex = glm::clamp(beginIndex, (uint32)0, (uint32)(indices.size() - 1));
 
 #if _MSC_VER
-        std::for_each(std::execution::par_unseq, indices.begin(), indices.end(), [&](uint32 i)
+        std::for_each(std::execution::par_unseq, indices.begin() + beginIndex, indices.end(), [&](uint32 i)
         {
             if (auto objectPtr = primitives[i].lock())
             {
@@ -1306,39 +1268,45 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
                 {
                     .genericMatrix = objectPtr->getModelMatrix(),
                     .textureId = texturesInitData[objectPtr->getColorTexturePath()],
-                    .isPortal = bIsPortal    
+                    .primitiveNum = static_cast<uint32_t>(primitiveType),
                 };
                 memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
             }
             else
             {
                 // Object is expired. Handle accordingly if needed.
+                assert(false);
             }
         });
 #elif __APPLE__
         // Decide on the number of threads based on the number of available cores
-        size_t numThreads = std::thread::hardware_concurrency();
-        size_t chunkSize = indices.size() / numThreads;
+        //size_t numThreads = std::thread::hardware_concurrency();
+        //size_t chunkSize = indices.size() / numThreads;
         
         // Vector to store threads
-        std::vector<std::thread> threads;
+        //std::vector<std::thread> threads;
 
         // Launch threads
-        for (size_t t = 0; t < numThreads; ++t) 
+        //for (size_t t = 0; t < numThreads; ++t) 
         {
-            size_t startIdx = t * chunkSize;
-            size_t endIdx = (t == numThreads - 1) ? indices.size() : startIdx + chunkSize;
+            //size_t startIdx = t * chunkSize;
+            //size_t endIdx = (t == numThreads - 1) ? indices.size() : startIdx + chunkSize;
             
-            threads.emplace_back([this, &primitives, &indices, startIdx, endIdx, bIsPortal]() 
+            //threads.emplace_back([this, &primitives, &indices, startIdx, endIdx, portalIndex]() 
+
+            uint32 startIdx = beginIndex;
+            uint32 endIdx = indices.size();
+
                 {
-                    for (size_t i = startIdx; i < endIdx; ++i) {
+                    for (uint32 i = startIdx; i < endIdx; ++i) 
+                    {
                         if (auto objectPtr = primitives[i].lock()) 
                         {
                             SSBOData data
                             {
                                 .genericMatrix = objectPtr->getModelMatrix(),
                                 .textureId = texturesInitData[objectPtr->getColorTexturePath()],
-                                .isPortal = bIsPortal
+                                .primitiveNum = static_cast<uint32_t>(primitiveType)
                             };
                             memcpy((uint8_t*)stagingBufferPtr + i * sizeof(SSBOData), &data, sizeof(SSBOData));
                         } 
@@ -1348,20 +1316,28 @@ void LRenderer::updateStaticStorageBuffer(/*uint32 imageIndex*/)
                         }
                     }
                 }
-            );
+            //);
         }
 
         // Join threads
-        for (auto& thread : threads) 
-        {
-            thread.join();
-        }
+        //for (auto& thread : threads) 
+        //{
+        //    thread.join();
+        //}
 #endif
 
         ++instancedArrayNum;
 
-        copyBuffer(stagingBuffer.buffer, bufferToCopy, primitives.size() * sizeof(SSBOData));
+        auto dynamicUpdateSize = (primitives.size() - beginIndex) * sizeof(SSBOData);
+        auto dynamicUpdateOffset = beginIndex * sizeof(SSBOData);
+
+        if (dynamicUpdateSize)
+        {
+            copyBuffer(stagingBuffer.buffer, bufferToCopy, dynamicUpdateSize, dynamicUpdateOffset, dynamicUpdateOffset);
+        }
     }
+
+    bIsFirstDraw = false;
 }
 
 //void LRenderer::setProjection(float degrees, float zNear, float zFar)
@@ -1443,12 +1419,40 @@ void LRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMem
     HANDLE_VK_ERROR(vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer, &bufferMemory, nullptr))
 }
 
-void LRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+void LRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset, VkDeviceSize dstOffset)
 {
     VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
     VkBufferCopy copyRegion{};
     copyRegion.size = size;
+    copyRegion.srcOffset = srcOffset;
+    copyRegion.dstOffset = dstOffset;
+
+    VkBufferMemoryBarrier memoryBarrier =
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .buffer = dstBuffer,
+        .offset = dstOffset,
+        .size = size,
+    };
+
+    {
+        ZoneScopedN("copyBuffer memory barrier");
+
+        vkCmdPipelineBarrier(commandBuffer,
+            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            1,
+            &memoryBarrier,
+            0,
+            nullptr);
+    }
+
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
     endSingleTimeCommands(commandBuffer);
 }
@@ -1667,11 +1671,12 @@ void LRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32 imageI
 {
     ZoneScoped;
 
-    //if (!bUpdatedStaticStorageBuffer)
+    if (bIsFirstDraw)
     {
-        updateStaticStorageBuffer();
-        bUpdatedStaticStorageBuffer = true;
+        sortPreloadedInstancedMeshes();
     }
+
+    updateStaticStorageBuffer();
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2188,17 +2193,22 @@ void LRenderer::addPrimitive(std::weak_ptr<LG::LGraphicsComponent> ptr)
 {
     if (auto sharedPtr = ptr.lock())
     {
-        const auto& typeName = sharedPtr->getTypeName();
+        LG::EPrimitiveType type = sharedPtr->getType();
 
         if (LG::isPortal(sharedPtr.get()))
         {
             portals.emplace_back(std::reinterpret_pointer_cast<LG::LPortal>(sharedPtr));
-            auto& staticInstancesArray = staticPreloadedInstancedMeshes[typeName];
+            auto& staticInstancesArray = preloadedInstancedMeshes[type];
             staticInstancesArray.emplace_back(ptr);
         }
-        else if (isEnoughStaticInstanceSpace(typeName) && LG::isInstancePrimitive(sharedPtr.get()))
+        else if (isEnoughPreloadedInstanceSpace(type) && LG::isInstancePrimitive(sharedPtr.get()))
         {
-            auto& staticInstancesArray = staticPreloadedInstancedMeshes[typeName];
+            auto& staticInstancesArray = preloadedInstancedMeshes[type];
+            if (!staticInstancesArray.size())
+            {
+                preloadedInstancedMeshesDynamicOffsets[type] = invalidDynamicOffset;
+            }
+
             staticInstancesArray.emplace_back(ptr);
         }
         else
@@ -2364,7 +2374,7 @@ void LRenderer::RenderPass::beginPass(VkCommandBuffer commandBuffer, VkFramebuff
     renderPassInfo.renderArea.extent = size;
 
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+    clearValues[0].color = { { 0.486, 0.78, 0.91, 1.0f } };
     clearValues[1].depthStencil = { 1.0f, 0 };
 
     renderPassInfo.clearValueCount = static_cast<uint32>(clearValues.size());
@@ -2381,4 +2391,26 @@ void LRenderer::RenderPass::endPass(VkCommandBuffer commandBuffer)
 void LRenderer::RenderPass::clear()
 {
     vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
+}
+
+void LRenderer::sortPreloadedInstancedMeshes()
+{
+    for (auto& [primitiveName, primitives] : preloadedInstancedMeshes)
+    {
+        std::sort(primitives.begin(), primitives.end(),[](const std::weak_ptr<LG::LGraphicsComponent>& a, const std::weak_ptr<LG::LGraphicsComponent>& b)
+        {
+            return a.lock()->isAlwaysStatic() > b.lock()->isAlwaysStatic();
+        });
+
+        preloadedInstancedMeshesDynamicOffsets[primitiveName] = invalidDynamicOffset;
+
+        for (int64_t i = primitives.size() - 1; i >= 0; --i)
+        {
+            if (primitives[i].lock()->isAlwaysStatic())
+            {
+                preloadedInstancedMeshesDynamicOffsets[primitiveName] = i;
+                break;
+            }
+        }
+    }
 }

@@ -13,6 +13,15 @@
 
 namespace LG
 {
+    enum class EPrimitiveType : uint8_t
+    {
+        Plane = 0,
+        Cube = 1,
+        GenericPortal = 2,
+        BluePortal = 3,
+        OrangePortal = 4,
+    };
+
     class LGraphicsComponent
     {
         LGraphicsComponent(const LGraphicsComponent&) = delete;
@@ -83,9 +92,9 @@ namespace LG
             return *indices;
         };
 
-        const std::string& getTypeName()
+        EPrimitiveType getType()
         {
-            return typeName;
+            return type;
         }
 
         static const std::set<std::string>& getInitTexturesData() { return textures; }
@@ -97,6 +106,7 @@ namespace LG
         virtual ~LGraphicsComponent();
 
         const std::function<glm::mat4x4()> getModelMatrix = [](){ return glm::mat4x4(1); };
+        const std::function<bool()> isAlwaysStatic = []() { return true; };
         
     protected:
 
@@ -104,7 +114,9 @@ namespace LG
         const std::vector<uint16>* indices = nullptr;
 
         // TODO: should be changed to hash/index storage to reduce memory usage
-        std::string typeName;
+
+        //std::string typeName;
+        EPrimitiveType type;
         std::string texturePath;
 
         // TODO: temporal desicion
@@ -121,7 +133,7 @@ namespace LG
 
         LCube()
         {
-            typeName = std::string("LCube");
+            type = EPrimitiveType::Cube;
             vertices = &verticesCube;
             indices = &indicesCube;
         }
@@ -137,7 +149,7 @@ namespace LG
 
         LPlane()
         {
-            typeName = std::string("LPlane");
+            type = EPrimitiveType::Plane;
             vertices = &verticesPlane;
             indices = &indicesPlane;
         }
@@ -154,7 +166,7 @@ namespace LG
             portalIndex = ++portalCounter;
             std::string textureName = std::format("portal{}", portalIndex);
             setColorTexture(std::move(textureName));
-            typeName = std::string("LPortal");
+            type = EPrimitiveType::GenericPortal;
         }
 
         const glm::mat4& getPortalView() const { return view; }
@@ -185,5 +197,25 @@ namespace LG
     {
         return dynamic_cast<LG::LPortal*>(ptr);
     }
+
+    class BluePortal: public LPortal
+    {
+        public:
+
+        BluePortal()
+        {
+            type = EPrimitiveType::BluePortal;
+        }
+    };
+
+    class OrangePortal: public LPortal
+    {
+        public:
+        
+        OrangePortal()
+        {
+            type = EPrimitiveType::OrangePortal;
+        }
+    };
 
 }
